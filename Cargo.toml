@@ -1,0 +1,9 @@
+[package]
+name = "evs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.56", features = ["derive", "env"] }
+clap_complete = "4.5.65"
+clap_mangen = "0.2.31"
