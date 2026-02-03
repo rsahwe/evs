@@ -97,7 +97,7 @@ impl Repository {
             .open(&lockfile_path)
             .map_err(|e| (e, lockfile_path.clone()))?;
 
-        lockfile.lock().map_err(|e| (e, lockfile_path.clone()))?;
+        lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
         if options.verbose >= VERBOSITY_ALL {
             eprintln!("### Successfully obtained lock.");
@@ -179,7 +179,7 @@ impl Repository {
             .open(&lockfile_path)
             .map_err(|e| (e, lockfile_path.clone()))?;
 
-        lockfile.lock().map_err(|e| (e, lockfile_path.clone()))?;
+        lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
         if options.verbose >= VERBOSITY_ALL {
             eprintln!("### Created and locked lockfile.");
@@ -244,7 +244,9 @@ impl Repository {
                     return Ok(repo);
                 }
                 Err(e) => match e {
-                    EvsError::IOError(_, _) | EvsError::CorruptStateDetected(_) => return Err(e),
+                    EvsError::IOError(_, _)
+                    | EvsError::CorruptStateDetected(_)
+                    | EvsError::RepositoryLocked(_, _) => return Err(e),
                     EvsError::MissingRepository(_) | EvsError::RepositoryNotFound => (),
                 },
             }

@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     fmt::{Debug, Display},
+    fs::TryLockError,
     io,
     path::PathBuf,
 };
@@ -11,6 +12,7 @@ pub enum EvsError {
     MissingRepository(PathBuf),
     CorruptStateDetected(CorruptState),
     RepositoryNotFound,
+    RepositoryLocked(TryLockError, PathBuf),
 }
 
 impl Display for EvsError {
@@ -20,6 +22,9 @@ impl Display for EvsError {
             EvsError::MissingRepository(pb) => write!(f, "No repository found at`{:?}", pb),
             EvsError::CorruptStateDetected(cs) => write!(f, "Corrupt state: {}", cs),
             EvsError::RepositoryNotFound => write!(f, "No repository was found"),
+            EvsError::RepositoryLocked(err, pb) => {
+                write!(f, "The repository at {:?} could not be locked: {}", pb, err)
+            }
         }
     }
 }
@@ -29,6 +34,12 @@ impl Error for EvsError {}
 impl From<(io::Error, PathBuf)> for EvsError {
     fn from(value: (io::Error, PathBuf)) -> Self {
         EvsError::IOError(value.0, value.1)
+    }
+}
+
+impl From<(TryLockError, PathBuf)> for EvsError {
+    fn from(value: (TryLockError, PathBuf)) -> Self {
+        EvsError::RepositoryLocked(value.0, value.1)
     }
 }
 

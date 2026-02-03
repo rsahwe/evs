@@ -14,7 +14,7 @@ pub const VERBOSITY_ALL: u8 = 3;
 #[command(version, about = "Ev source control")]
 pub struct Cli {
     /// Increases the verbosity level by one each time it appears.
-    #[arg(short, action(ArgAction::Count))]
+    #[arg(short, action(ArgAction::Count), global(true))]
     pub verbose: u8,
 
     #[command(subcommand)]
