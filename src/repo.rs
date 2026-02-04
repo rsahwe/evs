@@ -1,6 +1,7 @@
 use std::{
     fs::{DirBuilder, File, OpenOptions},
     io::{Read, Write},
+    mem::ManuallyDrop,
     path::{Path, PathBuf},
 };
 
@@ -28,9 +29,9 @@ impl Repository {
             eprintln!("## Repository::open({:?})", path.as_ref());
         }
 
-        let _drop = DropAction(|| {
+        let drop = DropAction(|| {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::open(...) done");
+                eprintln!("## Repository::open(...) error");
             }
         });
 
@@ -127,6 +128,12 @@ impl Repository {
             eprintln!("### Created repository.");
         }
 
+        let _ = ManuallyDrop::new(drop);
+
+        if options.verbose >= VERBOSITY_TRACE {
+            eprintln!("## Repository::open(...) done");
+        }
+
         Ok(repository)
     }
 
@@ -135,9 +142,9 @@ impl Repository {
             eprintln!("## Repository::create({:?})", path.as_ref());
         }
 
-        let _drop = DropAction(|| {
+        let drop = DropAction(|| {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::create(...) done");
+                eprintln!("## Repository::create(...) error");
             }
         });
 
@@ -170,6 +177,14 @@ impl Repository {
             eprintln!("### Created store directory.");
         }
 
+        let store = Store::new(store);
+
+        store.insert(&[], options)?;
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!("### Inserted null object.");
+        }
+
         let lockfile_path = repo.join("lock");
 
         let mut lockfile = OpenOptions::new()
@@ -199,12 +214,18 @@ impl Repository {
             workspace: path.as_ref().to_path_buf(),
             repository: repo,
             lockfile,
-            store: Store::new(store),
+            store,
             info: repo_info,
         };
 
         if options.verbose >= VERBOSITY_ALL {
             eprintln!("### Created repository.");
+        }
+
+        let _ = ManuallyDrop::new(drop);
+
+        if options.verbose >= VERBOSITY_TRACE {
+            eprintln!("## Repository::create(...) done");
         }
 
         Ok(repository)
@@ -215,9 +236,9 @@ impl Repository {
             eprintln!("## Repository::find({:?})", path.as_ref());
         }
 
-        let _drop = DropAction(|| {
+        let drop = DropAction(|| {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::find(...) done");
+                eprintln!("## Repository::find(...) error");
             }
         });
 
@@ -241,13 +262,20 @@ impl Repository {
                         eprintln!("### Found repository at {:?}", path);
                     }
 
+                    let _ = ManuallyDrop::new(drop);
+
+                    if options.verbose >= VERBOSITY_TRACE {
+                        eprintln!("## Repository::find(...) done");
+                    }
+
                     return Ok(repo);
                 }
                 Err(e) => match e {
                     EvsError::IOError(_, _)
                     | EvsError::CorruptStateDetected(_)
                     | EvsError::RepositoryLocked(_, _)
-                    | EvsError::ObjectNotInStore(_) => return Err(e),
+                    | EvsError::ObjectNotInStore(_)
+                    | EvsError::AmbiguousObject(_) => return Err(e),
                     EvsError::MissingRepository(_) | EvsError::RepositoryNotFound => (),
                 },
             }

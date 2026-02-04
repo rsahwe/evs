@@ -43,7 +43,11 @@ fn main() {
                     eprintln!("# Found repository at {:?}.", repo.repository);
                 }
 
-                todo!("Check repo {:?} for existing head and valid store", repo);
+                repo.store.check(&cli)?;
+
+                drop(repo);
+
+                eprintln!("Checked store successfully.");
             }
         }
 

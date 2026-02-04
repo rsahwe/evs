@@ -1,17 +1,24 @@
-use std::{fmt::Display, fs::OpenOptions, io::Write, path::PathBuf};
+use std::{
+    fmt::Display,
+    fs::{self, OpenOptions},
+    io::{Read, Write},
+    mem::ManuallyDrop,
+    path::PathBuf,
+};
 
-use flate2::{Compression, write::GzEncoder};
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
 
 use crate::{
     cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
-    error::EvsError,
+    error::{CorruptState, EvsError},
     util::DropAction,
 };
 
 pub type Hash = [u8; 32];
 pub type PartialHash<'a> = &'a [u8];
 
+/// Needs to double the length of a hash (it does)
 #[derive(Debug)]
 pub struct HashDisplay<'a>(pub PartialHash<'a>);
 
@@ -46,9 +53,9 @@ impl Store {
             eprintln!("## Store::insert(self, <data of size {}>)", data.len());
         }
 
-        let _drop = DropAction(|| {
+        let drop = DropAction(|| {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::insert(self, ...) done");
+                eprintln!("## Store::insert(self, ...) error");
             }
         });
 
@@ -72,11 +79,13 @@ impl Store {
 
         let hash: Hash = Sha256::digest(&compressed).into();
 
+        let hash_display = format!("{}", HashDisplay(&hash));
+
         if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Data hashed to {}.", HashDisplay(&hash));
+            eprintln!("### Data hashed to {}.", hash_display);
         }
 
-        let target = self.path.join(&format!("{}", HashDisplay(&hash)));
+        let target = self.path.join(&hash_display);
 
         if target.exists() {
             if options.verbose >= VERBOSITY_ALL {
@@ -102,14 +111,20 @@ impl Store {
                 eprintln!("### Wrote object to store.");
             }
 
+            let _ = ManuallyDrop::new(drop);
+
+            if options.verbose >= VERBOSITY_TRACE {
+                eprintln!("## Store::insert(self, ...) done");
+            }
+
             Ok(hash)
         }
     }
 
-    pub fn lookup(&self, id: PartialHash, options: &Cli) -> Result<Vec<u8>, EvsError> {
-        if size_of_val(id) > size_of::<Hash>() {
+    pub fn lookup(&self, id: &str, options: &Cli) -> Result<Vec<u8>, EvsError> {
+        if size_of_val(id) > size_of::<Hash>() * 2 {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::lookup(self, <overlength hash>) errored");
+                eprintln!("## Store::lookup(self, <overlength hash>) wrong args");
             }
 
             return Err(EvsError::ObjectNotInStore(id.to_owned()));
@@ -117,18 +132,144 @@ impl Store {
 
         if options.verbose >= VERBOSITY_TRACE {
             eprintln!(
-                "## Store::lookup(self, {}{})",
-                HashDisplay(id),
-                if id.len() < 32 { "..." } else { "" }
+                "## Store::lookup(self, \"{}{}\")",
+                id,
+                if size_of_val(id) < size_of::<Hash>() * 2 {
+                    "..."
+                } else {
+                    ""
+                }
             );
         }
 
-        let _drop = DropAction(|| {
+        let drop = DropAction(|| {
             if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::lookup(self, ...) done");
+                eprintln!("## Store::lookup(self, ...) error");
             }
         });
 
-        todo!("lookup")
+        let mut target = None;
+
+        for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
+            let obj = obj.map_err(|e| (e, self.path.clone()))?;
+
+            let name = obj.path();
+
+            if let Some(hash) = name.file_name()
+                && hash.as_encoded_bytes().starts_with(id.as_bytes())
+            {
+                if target.is_some() {
+                    return Err(EvsError::AmbiguousObject(id.to_owned()));
+                }
+
+                target = Some(name);
+            }
+        }
+
+        if target.is_none() {
+            return Err(EvsError::ObjectNotInStore(id.to_owned()));
+        }
+
+        let target = target.unwrap();
+
+        let target_name = target.file_name().unwrap();
+
+        if size_of_val(target_name) != size_of::<Hash>() * 2
+            || !target_name
+                .as_encoded_bytes()
+                .iter()
+                .all(|b| matches!(*b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(EvsError::CorruptStateDetected(
+                CorruptState::InvalidObjectName(target_name.to_owned()),
+            ));
+        }
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!("### Found object {:?}.", target);
+        }
+
+        let content = fs::read(&target).map_err(|e| (e, target.clone()))?;
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!("### Read object of compressed size {}.", content.len());
+        }
+
+        let real_hash: Hash = Sha256::digest(&content).into();
+
+        if *target_name != *format!("{}", HashDisplay(&real_hash)) {
+            return Err(EvsError::CorruptStateDetected(CorruptState::HashMismatch(
+                target_name.to_owned(),
+                real_hash.to_vec(),
+            )));
+        }
+
+        let mut decoder = GzDecoder::new(&*content);
+
+        let mut decompressed = vec![];
+
+        decoder.read_to_end(&mut decompressed).map_err(|e| {
+            EvsError::CorruptStateDetected(CorruptState::InvalidCompression(target.clone(), e))
+        })?;
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!("### Decompressed to size {}", decompressed.len());
+        }
+
+        let _ = ManuallyDrop::new(drop);
+
+        if options.verbose >= VERBOSITY_TRACE {
+            eprintln!("## Store::lookup(self, ...) done");
+        }
+
+        Ok(decompressed)
+    }
+
+    pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
+        if options.verbose >= VERBOSITY_TRACE {
+            eprintln!("## Store::check(self)");
+        }
+
+        let mut count = 0;
+
+        for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
+            let obj = obj.map_err(|e| (e, self.path.clone()))?;
+
+            let name = obj.file_name();
+
+            let bytes = name.as_encoded_bytes();
+
+            if size_of_val(bytes) != size_of::<Hash>() * 2 || name.to_str().is_none() {
+                return Err(EvsError::CorruptStateDetected(
+                    CorruptState::InvalidObjectName(name),
+                ));
+            }
+
+            let _ = self.lookup(name.to_str().unwrap(), options)?;
+
+            if options.verbose >= VERBOSITY_ALL {
+                eprintln!("### Validated {:?}.", name);
+            }
+
+            count += 1;
+        }
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!("### Finished validating {} objects.", count);
+        }
+
+        let drop = DropAction(|| {
+            if options.verbose >= VERBOSITY_TRACE {
+                eprintln!("## Store::check(self) error");
+            }
+        });
+
+        let _ = ManuallyDrop::new(drop);
+
+        if options.verbose >= VERBOSITY_TRACE {
+            eprintln!("## Store::check(self) done");
+        }
+
+        Ok(())
     }
 }

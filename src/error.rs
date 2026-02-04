@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    ffi::OsString,
     fmt::{Debug, Display},
     fs::TryLockError,
     io,
@@ -16,7 +17,8 @@ pub enum EvsError {
     CorruptStateDetected(CorruptState),
     RepositoryNotFound,
     RepositoryLocked(TryLockError, PathBuf),
-    ObjectNotInStore(<<PartialHash<'static> as Deref>::Target as ToOwned>::Owned),
+    ObjectNotInStore(String),
+    AmbiguousObject(String),
 }
 
 impl Display for EvsError {
@@ -29,11 +31,12 @@ impl Display for EvsError {
             EvsError::RepositoryLocked(err, pb) => {
                 write!(f, "The repository at {:?} could not be locked: {}", pb, err)
             }
-            EvsError::ObjectNotInStore(hash) => write!(
-                f,
-                "Could not find object \"{}\" in store",
-                HashDisplay(hash)
-            ),
+            EvsError::ObjectNotInStore(hash) => {
+                write!(f, "Could not find object \"{}\" in store", hash)
+            }
+            EvsError::AmbiguousObject(hash) => {
+                write!(f, "Name \"{}\" matches more than one object", hash)
+            }
         }
     }
 }
@@ -57,6 +60,12 @@ pub enum CorruptState {
     MissingPath(PathBuf),
     DirectoryIsFile(PathBuf),
     FileIsDirectory(PathBuf),
+    InvalidObjectName(OsString),
+    HashMismatch(
+        OsString,
+        <<PartialHash<'static> as Deref>::Target as ToOwned>::Owned,
+    ),
+    InvalidCompression(PathBuf, io::Error),
 }
 
 impl Display for CorruptState {
@@ -65,6 +74,18 @@ impl Display for CorruptState {
             CorruptState::MissingPath(pb) => write!(f, "Path {:?} is missing", pb),
             CorruptState::DirectoryIsFile(pb) => write!(f, "Path {:?} should be a directory", pb),
             CorruptState::FileIsDirectory(pb) => write!(f, "Path {:?} should be a file", pb),
+            CorruptState::InvalidObjectName(name) => {
+                write!(f, "Found invalid object name {:?} in store", name)
+            }
+            CorruptState::HashMismatch(found, real) => write!(
+                f,
+                "Object {:?} seemingly contains object \"{}\"",
+                found,
+                HashDisplay(real)
+            ),
+            CorruptState::InvalidCompression(pb, err) => {
+                write!(f, "Path {:?} is compressed incorrectly: {}", pb, err)
+            }
         }
     }
 }
