@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
     error::{CorruptState, EvsError},
-    store::{Hash, NULL_HASH},
+    store::{Hash, NULL_HASH, Store},
     util::DropAction,
 };
 
@@ -18,7 +18,7 @@ pub struct Repository {
     pub workspace: PathBuf,
     pub repository: PathBuf,
     pub lockfile: File,
-    pub store: PathBuf,
+    pub store: Store,
     pub info: RepositoryInfo,
 }
 
@@ -119,7 +119,7 @@ impl Repository {
             workspace: path.as_ref().to_path_buf(),
             repository: repo,
             lockfile,
-            store,
+            store: Store::new(store),
             info: repo_info,
         };
 
@@ -199,7 +199,7 @@ impl Repository {
             workspace: path.as_ref().to_path_buf(),
             repository: repo,
             lockfile,
-            store,
+            store: Store::new(store),
             info: repo_info,
         };
 
@@ -246,7 +246,8 @@ impl Repository {
                 Err(e) => match e {
                     EvsError::IOError(_, _)
                     | EvsError::CorruptStateDetected(_)
-                    | EvsError::RepositoryLocked(_, _) => return Err(e),
+                    | EvsError::RepositoryLocked(_, _)
+                    | EvsError::ObjectNotInStore(_) => return Err(e),
                     EvsError::MissingRepository(_) | EvsError::RepositoryNotFound => (),
                 },
             }

@@ -7,6 +7,7 @@ edition = "2024"
 clap = { version = "4.5.56", features = ["derive", "env"] }
 clap_complete = "4.5.65"
 clap_mangen = "0.2.31"
+flate2 = "1.1.9"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_cbor = "0.11.2"
 sha2 = "0.10.9"

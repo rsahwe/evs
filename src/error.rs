@@ -3,8 +3,11 @@ use std::{
     fmt::{Debug, Display},
     fs::TryLockError,
     io,
+    ops::Deref,
     path::PathBuf,
 };
+
+use crate::store::{HashDisplay, PartialHash};
 
 #[derive(Debug)]
 pub enum EvsError {
@@ -13,6 +16,7 @@ pub enum EvsError {
     CorruptStateDetected(CorruptState),
     RepositoryNotFound,
     RepositoryLocked(TryLockError, PathBuf),
+    ObjectNotInStore(<<PartialHash<'static> as Deref>::Target as ToOwned>::Owned),
 }
 
 impl Display for EvsError {
@@ -25,6 +29,11 @@ impl Display for EvsError {
             EvsError::RepositoryLocked(err, pb) => {
                 write!(f, "The repository at {:?} could not be locked: {}", pb, err)
             }
+            EvsError::ObjectNotInStore(hash) => write!(
+                f,
+                "Could not find object \"{}\" in store",
+                HashDisplay(hash)
+            ),
         }
     }
 }
