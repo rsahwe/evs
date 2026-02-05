@@ -43,11 +43,11 @@ fn main() {
                     eprintln!("# Found repository at {:?}.", repo.repository);
                 }
 
-                repo.store.check(&cli)?;
+                repo.check(&cli)?;
 
                 drop(repo);
 
-                eprintln!("Checked store successfully.");
+                eprintln!("Repository checked successfully.");
             }
         }
 

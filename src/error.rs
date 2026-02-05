@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::store::{HashDisplay, PartialHash};
+use crate::store::{Hash, HashDisplay, PartialHash};
 
 #[derive(Debug)]
 pub enum EvsError {
@@ -66,6 +66,7 @@ pub enum CorruptState {
         <<PartialHash<'static> as Deref>::Target as ToOwned>::Owned,
     ),
     InvalidCompression(PathBuf, io::Error),
+    MissingObjects(Hash, usize),
 }
 
 impl Display for CorruptState {
@@ -85,6 +86,14 @@ impl Display for CorruptState {
             ),
             CorruptState::InvalidCompression(pb, err) => {
                 write!(f, "Path {:?} is compressed incorrectly: {}", pb, err)
+            }
+            Self::MissingObjects(first, rest) => {
+                write!(
+                    f,
+                    "Object \"{}\" (+{} more) is missing",
+                    HashDisplay(first),
+                    rest
+                )
             }
         }
     }

@@ -1,6 +1,6 @@
 use std::{
     fs::{DirBuilder, File, OpenOptions},
-    io::{Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem::ManuallyDrop,
     path::{Path, PathBuf},
 };
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
     error::{CorruptState, EvsError},
-    store::{Hash, NULL_HASH, Store},
+    store::{Hash, Store},
     util::DropAction,
 };
 
@@ -179,7 +179,8 @@ impl Repository {
 
         let store = Store::new(store);
 
-        store.insert(&[], options)?;
+        // The NULL object. TODO: Replace with more accurate NULL object later
+        let root = store.insert(&[], options)?;
 
         if options.verbose >= VERBOSITY_ALL {
             eprintln!("### Inserted null object.");
@@ -200,7 +201,10 @@ impl Repository {
             eprintln!("### Created and locked lockfile.");
         }
 
-        let repo_info = RepositoryInfo { head: NULL_HASH };
+        let repo_info = RepositoryInfo {
+            head: root,
+            modified: false,
+        };
 
         lockfile
             .write_all(&serde_cbor::to_vec(&repo_info).expect("cbor failed"))
@@ -285,10 +289,41 @@ impl Repository {
             }
         }
     }
+
+    pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
+        self.store.check(&[self.info.head()], options)
+    }
+}
+
+impl Drop for Repository {
+    fn drop(&mut self) {
+        let r = || -> Result<(), io::Error> {
+            if self.info.modified {
+                self.lockfile.set_len(0)?;
+                self.lockfile.seek(SeekFrom::Start(0))?;
+                self.lockfile
+                    .write_all(&serde_cbor::to_vec(&self.info).expect("cbor failed"))?;
+            }
+
+            Ok(())
+        }();
+
+        if let Err(err) = r {
+            eprintln!("Writing back Repository Info failed: {}", err);
+        }
+    }
 }
 
 /// All of the info about the repository
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RepositoryInfo {
     head: Hash,
+    #[serde(skip)]
+    modified: bool,
+}
+
+impl RepositoryInfo {
+    pub fn head(&self) -> Hash {
+        self.head
+    }
 }

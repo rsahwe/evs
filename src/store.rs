@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::Display,
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -31,11 +32,6 @@ impl<'a> Display for HashDisplay<'a> {
         Ok(())
     }
 }
-
-pub const NULL_HASH: Hash = [
-    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-];
 
 #[derive(Debug)]
 pub struct Store {
@@ -121,7 +117,7 @@ impl Store {
         }
     }
 
-    pub fn lookup(&self, id: &str, options: &Cli) -> Result<Vec<u8>, EvsError> {
+    pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Vec<u8>), EvsError> {
         if size_of_val(id) > size_of::<Hash>() * 2 {
             if options.verbose >= VERBOSITY_TRACE {
                 eprintln!("## Store::lookup(self, <overlength hash>) wrong args");
@@ -150,19 +146,25 @@ impl Store {
 
         let mut target = None;
 
-        for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
-            let obj = obj.map_err(|e| (e, self.path.clone()))?;
+        if size_of_val(id) < size_of::<Hash>() * 2 {
+            let path = self.path.join(id);
 
-            let name = obj.path();
+            target = fs::exists(&path).is_ok().then_some(path);
+        } else {
+            for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
+                let obj = obj.map_err(|e| (e, self.path.clone()))?;
 
-            if let Some(hash) = name.file_name()
-                && hash.as_encoded_bytes().starts_with(id.as_bytes())
-            {
-                if target.is_some() {
-                    return Err(EvsError::AmbiguousObject(id.to_owned()));
+                let name = obj.path();
+
+                if let Some(hash) = name.file_name()
+                    && hash.as_encoded_bytes().starts_with(id.as_bytes())
+                {
+                    if target.is_some() {
+                        return Err(EvsError::AmbiguousObject(id.to_owned()));
+                    }
+
+                    target = Some(name);
                 }
-
-                target = Some(name);
             }
         }
 
@@ -222,15 +224,41 @@ impl Store {
             eprintln!("## Store::lookup(self, ...) done");
         }
 
-        Ok(decompressed)
+        Ok((real_hash, decompressed))
     }
 
-    pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
+    pub fn check(&self, required: impl AsRef<[Hash]>, options: &Cli) -> Result<(), EvsError> {
         if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Store::check(self)");
+            eprintln!(
+                "## Store::check(self, <{} hash(es)>)",
+                required.as_ref().len()
+            );
         }
 
-        let mut count = 0;
+        let drop = DropAction(|| {
+            if options.verbose >= VERBOSITY_TRACE {
+                eprintln!("## Store::check(self, ...) error");
+            }
+        });
+
+        let mut found = HashSet::new();
+
+        let required = {
+            let mut hm = HashSet::new();
+
+            for r in required.as_ref() {
+                hm.insert(*r);
+            }
+
+            hm
+        };
+
+        if options.verbose >= VERBOSITY_ALL {
+            eprintln!(
+                "### Initially required to find {} object(s).",
+                required.len()
+            );
+        }
 
         for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
             let obj = obj.map_err(|e| (e, self.path.clone()))?;
@@ -245,29 +273,38 @@ impl Store {
                 ));
             }
 
-            let _ = self.lookup(name.to_str().unwrap(), options)?;
+            let (hash, _) = self.lookup(name.to_str().unwrap(), options)?;
+
+            found.insert(hash);
+
+            //TODO: CHECK IF OBJECT IS VALID AND ADD REFERENCED HASHES TO REQUIRED
 
             if options.verbose >= VERBOSITY_ALL {
                 eprintln!("### Validated {:?}.", name);
             }
-
-            count += 1;
         }
 
         if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Finished validating {} objects.", count);
+            eprintln!(
+                "### Finished validating {}/{} (+{}) objects.",
+                required.intersection(&found).count(),
+                required.len(),
+                found.difference(&required).count(),
+            );
         }
 
-        let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::check(self) error");
-            }
-        });
+        let mut missing = required.difference(&found).cloned();
+
+        if let Some(first) = missing.next() {
+            return Err(EvsError::CorruptStateDetected(
+                CorruptState::MissingObjects(first, missing.count()),
+            ));
+        }
 
         let _ = ManuallyDrop::new(drop);
 
         if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Store::check(self) done");
+            eprintln!("## Store::check(self, ...) done");
         }
 
         Ok(())
