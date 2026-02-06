@@ -11,10 +11,12 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
+    cli::Cli,
     error::{CorruptState, EvsError},
     objects::Object,
+    trace,
     util::DropAction,
+    verbose,
 };
 
 pub type Hash = [u8; 32];
@@ -46,14 +48,14 @@ impl Store {
 
     /// Assumes a valid store and might cause unintended behaviour
     pub fn insert(&self, data: &[u8], options: &Cli) -> Result<Hash, EvsError> {
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Store::insert(self, <data of size {}>)", data.len());
-        }
+        trace!(
+            options,
+            "Store::insert(self, <data of size {}>)",
+            data.len()
+        );
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::insert(self, ...) error");
-            }
+            trace!(options, "Store::insert(self, ...) error");
         });
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
@@ -66,34 +68,30 @@ impl Store {
             .finish()
             .expect("gzip encoder failed: io error on vec");
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!(
-                "### Compressed data from {} to {} bytes.",
-                data.len(),
-                compressed.len()
-            );
-        }
+        verbose!(
+            options,
+            "Compressed data from {} to {} bytes.",
+            data.len(),
+            compressed.len()
+        );
 
         let hash: Hash = Sha256::digest(&compressed).into();
 
         let hash_display = format!("{}", HashDisplay(&hash));
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Data hashed to {}.", hash_display);
-        }
+        verbose!(options, "Data hashed to {}.", hash_display);
 
         let target = self.path.join(&hash_display);
 
         if target.exists() {
-            if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Object path exists! TODO: Maybe figure out strategy for this.");
-            }
+            verbose!(
+                options,
+                "Object path exists! TODO: Maybe figure out strategy for this."
+            );
 
             Ok(hash)
         } else {
-            if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Object path does not exist, inserting...");
-            }
+            verbose!(options, "Object path does not exist, inserting...");
 
             let mut file = OpenOptions::new()
                 .create_new(true)
@@ -104,45 +102,38 @@ impl Store {
             file.write_all(&compressed)
                 .map_err(|e| (e, target.clone()))?;
 
-            if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Wrote object to store.");
-            }
+            verbose!(options, "Wrote object to store.");
 
             let _ = ManuallyDrop::new(drop);
 
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::insert(self, ...) done");
-            }
+            trace!(options, "Store::insert(self, ...) done");
 
             Ok(hash)
         }
     }
 
     pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Vec<u8>), EvsError> {
+        //TODO: MAKE LOOKUP DESERIALIZE
+
         if size_of_val(id) > size_of::<Hash>() * 2 {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::lookup(self, <overlength hash>) wrong args");
-            }
+            trace!(options, "Store::lookup(self, <overlength hash>) wrong args");
 
             return Err(EvsError::ObjectNotInStore(id.to_owned()));
         }
 
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!(
-                "## Store::lookup(self, \"{}{}\")",
-                id,
-                if size_of_val(id) < size_of::<Hash>() * 2 {
-                    "..."
-                } else {
-                    ""
-                }
-            );
-        }
+        trace!(
+            options,
+            "Store::lookup(self, \"{}{}\")",
+            id,
+            if size_of_val(id) < size_of::<Hash>() * 2 {
+                "..."
+            } else {
+                ""
+            }
+        );
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::lookup(self, ...) error");
-            }
+            trace!(options, "Store::lookup(self, ...) error");
         });
 
         let mut target = None;
@@ -188,15 +179,11 @@ impl Store {
             ));
         }
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Found object {:?}.", target);
-        }
+        verbose!(options, "Found object {:?}.", target);
 
         let content = fs::read(&target).map_err(|e| (e, target.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Read object of compressed size {}.", content.len());
-        }
+        verbose!(options, "Read object of compressed size {}.", content.len());
 
         let real_hash: Hash = Sha256::digest(&content).into();
 
@@ -215,15 +202,11 @@ impl Store {
             EvsError::CorruptStateDetected(CorruptState::InvalidCompression(target.clone(), e))
         })?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Decompressed to size {}", decompressed.len());
-        }
+        verbose!(options, "Decompressed to size {}", decompressed.len());
 
         let _ = ManuallyDrop::new(drop);
 
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Store::lookup(self, ...) done");
-        }
+        trace!(options, "Store::lookup(self, ...) done");
 
         Ok((real_hash, decompressed))
     }
@@ -234,17 +217,14 @@ impl Store {
         required: impl AsRef<[Hash]>,
         options: &Cli,
     ) -> Result<HashSet<Hash>, EvsError> {
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!(
-                "## Store::check(self, <{} hash(es)>)",
-                required.as_ref().len()
-            );
-        }
+        trace!(
+            options,
+            "Store::check(self, <{} hash(es)>)",
+            required.as_ref().len()
+        );
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Store::check(self, ...) error");
-            }
+            trace!(options, "Store::check(self, ...) error");
         });
 
         let mut required = {
@@ -257,12 +237,11 @@ impl Store {
             hm
         };
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!(
-                "### Initially required to find {} object(s).",
-                required.len()
-            );
-        }
+        verbose!(
+            options,
+            "Initially required to find {} object(s).",
+            required.len()
+        );
 
         for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
             let obj = obj.map_err(|e| (e, self.path.clone()))?;
@@ -281,48 +260,38 @@ impl Store {
 
             let obj = serde_cbor::from_slice::<Object>(&obj).map_err(|e| (e, hash))?;
 
-            if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Validated {}.", HashDisplay(&hash));
-            }
+            verbose!(options, "Validated {}.", HashDisplay(&hash));
 
             match obj {
-                Object::Null => {
-                    if options.verbose >= VERBOSITY_ALL {
-                        eprintln!("### Found the NULL object! :)");
-                    }
-                }
-                Object::Blob(data) => {
-                    if options.verbose >= VERBOSITY_ALL {
-                        eprintln!("### Found blob of size {}.", data.len());
-                    }
-                }
+                Object::Null => verbose!(options, "Found the NULL object! :)"),
+                Object::Blob(data) => verbose!(options, "Found blob of size {}.", data.len()),
                 Object::Tree(items) => {
-                    if options.verbose >= VERBOSITY_ALL {
-                        eprintln!("### Found tree with {} children.", items.len());
-                    }
+                    verbose!(options, "Found tree with {} children.", items.len());
 
                     for item in items {
-                        if options.verbose >= VERBOSITY_ALL {
-                            eprintln!(
-                                "### Requiring {} for {}.",
-                                HashDisplay(&item.content),
-                                HashDisplay(&hash)
-                            );
-                        }
+                        verbose!(
+                            options,
+                            "Requiring {} for {}.",
+                            HashDisplay(&item.content),
+                            HashDisplay(&hash)
+                        );
 
                         required.insert(item.content);
                     }
                 }
                 Object::Commit(commit) => {
-                    if options.verbose >= VERBOSITY_ALL {
-                        eprintln!("### Found commit with state {}.", HashDisplay(&commit.tree));
+                    verbose!(
+                        options,
+                        "Found commit with state {}.",
+                        HashDisplay(&commit.tree)
+                    );
 
-                        eprintln!(
-                            "### Requiring {} for {}.",
-                            HashDisplay(&commit.tree),
-                            HashDisplay(&hash)
-                        );
-                    }
+                    verbose!(
+                        options,
+                        "Requiring {} for {}.",
+                        HashDisplay(&commit.tree),
+                        HashDisplay(&hash)
+                    );
 
                     required.insert(commit.tree);
                 }
@@ -331,14 +300,13 @@ impl Store {
             found.insert(hash);
         }
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!(
-                "### Finished validating {}/{} (+{}) objects.",
-                required.intersection(&found).count(),
-                required.len(),
-                found.difference(&required).count(),
-            );
-        }
+        verbose!(
+            options,
+            "Finished validating {}/{} (+{}) objects.",
+            required.intersection(&found).count(),
+            required.len(),
+            found.difference(&required).count(),
+        );
 
         let mut missing = required.difference(&found).cloned();
 
@@ -350,9 +318,7 @@ impl Store {
 
         let _ = ManuallyDrop::new(drop);
 
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Store::check(self, ...) done");
-        }
+        trace!(options, "Store::check(self, ...) done");
 
         Ok(found)
     }

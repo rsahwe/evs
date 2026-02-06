@@ -2,8 +2,9 @@ use std::path::Path;
 
 use clap::Parser;
 use evs::{
-    cli::{Cli, Commands, VERBOSITY_LOG},
+    cli::{Cli, Commands},
     error::EvsError,
+    log, none,
     repo::Repository,
 };
 
@@ -15,44 +16,37 @@ fn main() {
             Commands::Init { path } => {
                 let path = path.as_ref().map(ToOwned::to_owned).unwrap_or(".".into());
 
-                if cli.verbose >= VERBOSITY_LOG {
-                    eprintln!("# Creating repository at {:?}...", path);
-                }
+                log!(&cli, "Creating repository at {:?}...", path);
 
                 let repo = Repository::create(path, &cli)?;
 
-                if cli.verbose >= VERBOSITY_LOG {
-                    eprintln!("# Created repository.");
-                }
+                log!(&cli, "Created repository.");
 
                 drop(repo);
 
-                eprintln!("Repository initialized successfully.");
+                none!("Repository initialized successfully.");
             }
             Commands::Check => {
-                if cli.verbose >= VERBOSITY_LOG {
-                    eprintln!(
-                        "# Searching for repository starting from {:?}:",
-                        AsRef::<Path>::as_ref(".")
-                    );
-                }
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
 
                 let repo = Repository::find(".", &cli)?;
 
-                if cli.verbose >= VERBOSITY_LOG {
-                    eprintln!("# Found repository at {:?}.", repo.repository);
-                }
+                log!(&cli, "Found repository at {:?}.", repo.repository);
 
                 repo.check(&cli)?;
 
                 drop(repo);
 
-                eprintln!("Repository checked successfully.");
+                none!("Repository checked successfully.");
             }
         }
 
         Ok(())
     }() {
-        eprintln!("{}", e);
+        none!("{}", e);
     }
 }

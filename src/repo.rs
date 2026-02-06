@@ -9,11 +9,14 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
+    cli::Cli,
     error::{CorruptState, EvsError},
+    none,
     objects::Object,
     store::{Hash, Store},
+    trace,
     util::DropAction,
+    verbose,
 };
 
 #[derive(Debug)]
@@ -27,14 +30,10 @@ pub struct Repository {
 
 impl Repository {
     pub fn open(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Repository::open({:?})", path.as_ref());
-        }
+        trace!(options, "Repository::open({:?})", path.as_ref());
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::open(...) error");
-            }
+            trace!(options, "Repository::open(...) error");
         });
 
         let _ = path
@@ -42,9 +41,7 @@ impl Repository {
             .read_dir()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Workspace exists and is a directory.");
-        }
+        verbose!(options, "Workspace exists and is a directory.");
 
         let repo = path.as_ref().join(".evs");
 
@@ -58,9 +55,7 @@ impl Repository {
             ));
         }
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Repository exists and is a directory.");
-        }
+        verbose!(options, "Repository exists and is a directory.");
 
         let store = repo.join("store");
 
@@ -76,9 +71,7 @@ impl Repository {
             ));
         }
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Store exists and is a directory.");
-        }
+        verbose!(options, "Store exists and is a directory.");
 
         let lockfile_path = repo.join("lock");
 
@@ -102,9 +95,7 @@ impl Repository {
 
         lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Successfully obtained lock.");
-        }
+        verbose!(options, "Successfully obtained lock.");
 
         let mut repo_info = vec![];
 
@@ -114,9 +105,7 @@ impl Repository {
 
         let repo_info = serde_cbor::from_slice(&repo_info).expect("cbor failed");
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Read repository info successfully.");
-        }
+        verbose!(options, "Read repository info successfully.");
 
         let repository = Repository {
             workspace: path.as_ref().to_path_buf(),
@@ -126,28 +115,20 @@ impl Repository {
             info: repo_info,
         };
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Created repository.");
-        }
+        verbose!(options, "Created repository.");
 
         let _ = ManuallyDrop::new(drop);
 
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Repository::open(...) done");
-        }
+        trace!(options, "Repository::open(...) done");
 
         Ok(repository)
     }
 
     pub fn create(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Repository::create({:?})", path.as_ref());
-        }
+        trace!(options, "Repository::create({:?})", path.as_ref());
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::create(...) error");
-            }
+            trace!(options, "Repository::create(...) error");
         });
 
         let _ = path
@@ -155,9 +136,7 @@ impl Repository {
             .read_dir()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Workspace exists and is a directory.");
-        }
+        verbose!(options, "Workspace exists and is a directory.");
 
         let repo = path.as_ref().join(".evs");
 
@@ -165,9 +144,7 @@ impl Repository {
             .create(&repo)
             .map_err(|e| (e, repo.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Created repository directory.");
-        }
+        verbose!(options, "Created repository directory.");
 
         let store = repo.join("store");
 
@@ -175,9 +152,7 @@ impl Repository {
             .create(&store)
             .map_err(|e| (e, store.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Created store directory.");
-        }
+        verbose!(options, "Created store directory.");
 
         let store = Store::new(store);
 
@@ -186,9 +161,7 @@ impl Repository {
             options,
         )?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Inserted null object.");
-        }
+        verbose!(options, "Inserted null object.");
 
         let lockfile_path = repo.join("lock");
 
@@ -201,9 +174,7 @@ impl Repository {
 
         lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Created and locked lockfile.");
-        }
+        verbose!(options, "Created and locked lockfile.");
 
         let repo_info = RepositoryInfo {
             head: root,
@@ -214,9 +185,7 @@ impl Repository {
             .write_all(&serde_cbor::to_vec(&repo_info).expect("cbor failed"))
             .map_err(|e| (e, lockfile_path.clone()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Wrote repository info into the lockfile.");
-        }
+        verbose!(options, "Wrote repository info into the lockfile.");
 
         let repository = Repository {
             workspace: path.as_ref().to_path_buf(),
@@ -226,28 +195,20 @@ impl Repository {
             info: repo_info,
         };
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Created repository.");
-        }
+        verbose!(options, "Created repository.");
 
         let _ = ManuallyDrop::new(drop);
 
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Repository::create(...) done");
-        }
+        trace!(options, "Repository::create(...) done");
 
         Ok(repository)
     }
 
     pub fn find(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        if options.verbose >= VERBOSITY_TRACE {
-            eprintln!("## Repository::find({:?})", path.as_ref());
-        }
+        trace!(options, "Repository::find({:?})", path.as_ref());
 
         let drop = DropAction(|| {
-            if options.verbose >= VERBOSITY_TRACE {
-                eprintln!("## Repository::find(...) error");
-            }
+            trace!(options, "Repository::find(...) error");
         });
 
         let mut path = path
@@ -255,26 +216,18 @@ impl Repository {
             .canonicalize()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        if options.verbose >= VERBOSITY_ALL {
-            eprintln!("### Canonicalized path.");
-        }
+        verbose!(options, "Canonicalized path.");
 
         loop {
-            if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Trying path {:?}:", path);
-            }
+            verbose!(options, "Trying path {:?}:", path);
 
             match Self::open(&path, options) {
                 Ok(repo) => {
-                    if options.verbose >= VERBOSITY_ALL {
-                        eprintln!("### Found repository at {:?}", path);
-                    }
+                    verbose!(options, "Found repository at {:?}", path);
 
                     let _ = ManuallyDrop::new(drop);
 
-                    if options.verbose >= VERBOSITY_TRACE {
-                        eprintln!("## Repository::find(...) done");
-                    }
+                    trace!(options, "Repository::find(...) done");
 
                     return Ok(repo);
                 }
@@ -316,7 +269,7 @@ impl Drop for Repository {
         }();
 
         if let Err(err) = r {
-            eprintln!("Writing back Repository Info failed: {}", err);
+            none!("Writing back Repository Info failed: {}", err);
         }
     }
 }
