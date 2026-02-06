@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
     error::{CorruptState, EvsError},
+    objects::Object,
     util::DropAction,
 };
 
@@ -227,7 +228,12 @@ impl Store {
         Ok((real_hash, decompressed))
     }
 
-    pub fn check(&self, required: impl AsRef<[Hash]>, options: &Cli) -> Result<(), EvsError> {
+    pub fn check(
+        &self,
+        mut found: HashSet<Hash>,
+        required: impl AsRef<[Hash]>,
+        options: &Cli,
+    ) -> Result<HashSet<Hash>, EvsError> {
         if options.verbose >= VERBOSITY_TRACE {
             eprintln!(
                 "## Store::check(self, <{} hash(es)>)",
@@ -241,9 +247,7 @@ impl Store {
             }
         });
 
-        let mut found = HashSet::new();
-
-        let required = {
+        let mut required = {
             let mut hm = HashSet::new();
 
             for r in required.as_ref() {
@@ -273,15 +277,58 @@ impl Store {
                 ));
             }
 
-            let (hash, _) = self.lookup(name.to_str().unwrap(), options)?;
+            let (hash, obj) = self.lookup(name.to_str().unwrap(), options)?;
 
-            found.insert(hash);
-
-            //TODO: CHECK IF OBJECT IS VALID AND ADD REFERENCED HASHES TO REQUIRED
+            let obj = serde_cbor::from_slice::<Object>(&obj).map_err(|e| (e, hash))?;
 
             if options.verbose >= VERBOSITY_ALL {
-                eprintln!("### Validated {:?}.", name);
+                eprintln!("### Validated {}.", HashDisplay(&hash));
             }
+
+            match obj {
+                Object::Null => {
+                    if options.verbose >= VERBOSITY_ALL {
+                        eprintln!("### Found the NULL object! :)");
+                    }
+                }
+                Object::Blob(data) => {
+                    if options.verbose >= VERBOSITY_ALL {
+                        eprintln!("### Found blob of size {}.", data.len());
+                    }
+                }
+                Object::Tree(items) => {
+                    if options.verbose >= VERBOSITY_ALL {
+                        eprintln!("### Found tree with {} children.", items.len());
+                    }
+
+                    for item in items {
+                        if options.verbose >= VERBOSITY_ALL {
+                            eprintln!(
+                                "### Requiring {} for {}.",
+                                HashDisplay(&item.content),
+                                HashDisplay(&hash)
+                            );
+                        }
+
+                        required.insert(item.content);
+                    }
+                }
+                Object::Commit(commit) => {
+                    if options.verbose >= VERBOSITY_ALL {
+                        eprintln!("### Found commit with state {}.", HashDisplay(&commit.tree));
+
+                        eprintln!(
+                            "### Requiring {} for {}.",
+                            HashDisplay(&commit.tree),
+                            HashDisplay(&hash)
+                        );
+                    }
+
+                    required.insert(commit.tree);
+                }
+            }
+
+            found.insert(hash);
         }
 
         if options.verbose >= VERBOSITY_ALL {
@@ -307,6 +354,6 @@ impl Store {
             eprintln!("## Store::check(self, ...) done");
         }
 
-        Ok(())
+        Ok(found)
     }
 }

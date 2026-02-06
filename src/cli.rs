@@ -28,5 +28,6 @@ pub enum Commands {
         /// The location of the workspace.
         path: Option<PathBuf>,
     },
+    /// Checks the evs store for validity and completeness.
     Check,
 }

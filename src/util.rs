@@ -5,3 +5,5 @@ impl<F: Fn()> Drop for DropAction<F> {
         (self.0)()
     }
 }
+
+//TODO: MACROS

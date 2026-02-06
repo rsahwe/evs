@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{DirBuilder, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     mem::ManuallyDrop,
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cli::{Cli, VERBOSITY_ALL, VERBOSITY_TRACE},
     error::{CorruptState, EvsError},
+    objects::Object,
     store::{Hash, Store},
     util::DropAction,
 };
@@ -179,8 +181,10 @@ impl Repository {
 
         let store = Store::new(store);
 
-        // The NULL object. TODO: Replace with more accurate NULL object later
-        let root = store.insert(&[], options)?;
+        let root = store.insert(
+            &serde_cbor::to_vec(&Object::Null).expect("cbor failed"),
+            options,
+        )?;
 
         if options.verbose >= VERBOSITY_ALL {
             eprintln!("### Inserted null object.");
@@ -291,7 +295,10 @@ impl Repository {
     }
 
     pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
-        self.store.check(&[self.info.head()], options)
+        self.store
+            .check(HashSet::new(), &[self.info.head()], options)?;
+
+        Ok(())
     }
 }
 

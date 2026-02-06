@@ -55,6 +55,12 @@ impl From<(TryLockError, PathBuf)> for EvsError {
     }
 }
 
+impl From<(serde_cbor::Error, Hash)> for EvsError {
+    fn from(value: (serde_cbor::Error, Hash)) -> Self {
+        EvsError::CorruptStateDetected(CorruptState::InvalidObjectContent(value.1, value.0))
+    }
+}
+
 #[derive(Debug)]
 pub enum CorruptState {
     MissingPath(PathBuf),
@@ -67,6 +73,7 @@ pub enum CorruptState {
     ),
     InvalidCompression(PathBuf, io::Error),
     MissingObjects(Hash, usize),
+    InvalidObjectContent(Hash, serde_cbor::Error),
 }
 
 impl Display for CorruptState {
@@ -87,13 +94,16 @@ impl Display for CorruptState {
             CorruptState::InvalidCompression(pb, err) => {
                 write!(f, "Path {:?} is compressed incorrectly: {}", pb, err)
             }
-            Self::MissingObjects(first, rest) => {
+            CorruptState::MissingObjects(first, rest) => {
                 write!(
                     f,
                     "Object \"{}\" (+{} more) is missing",
                     HashDisplay(first),
                     rest
                 )
+            }
+            CorruptState::InvalidObjectContent(hash, err) => {
+                write!(f, "Object {} is not valid: {}", HashDisplay(hash), err)
             }
         }
     }
