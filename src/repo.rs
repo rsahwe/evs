@@ -103,7 +103,8 @@ impl Repository {
             .read_to_end(&mut repo_info)
             .map_err(|e| (e, lockfile_path.clone()))?;
 
-        let repo_info = serde_cbor::from_slice(&repo_info).expect("cbor failed");
+        let repo_info =
+            serde_cbor::from_slice(&repo_info).map_err(|e| EvsError::RepositoryInfoCorrupt(e))?;
 
         verbose!(options, "Read repository info successfully.");
 
@@ -163,6 +164,13 @@ impl Repository {
 
         verbose!(options, "Inserted null object.");
 
+        let empty_stage = store.insert(
+            &serde_cbor::to_vec(&Object::Tree(vec![])).expect("cbor failed"),
+            options,
+        )?;
+
+        verbose!(options, "Inserted empty tree.");
+
         let lockfile_path = repo.join("lock");
 
         let mut lockfile = OpenOptions::new()
@@ -178,6 +186,7 @@ impl Repository {
 
         let repo_info = RepositoryInfo {
             head: root,
+            stage: empty_stage,
             modified: false,
         };
 
@@ -232,12 +241,8 @@ impl Repository {
                     return Ok(repo);
                 }
                 Err(e) => match e {
-                    EvsError::IOError(_, _)
-                    | EvsError::CorruptStateDetected(_)
-                    | EvsError::RepositoryLocked(_, _)
-                    | EvsError::ObjectNotInStore(_)
-                    | EvsError::AmbiguousObject(_) => return Err(e),
-                    EvsError::MissingRepository(_) | EvsError::RepositoryNotFound => (),
+                    EvsError::MissingRepository(_) => (),
+                    _ => return Err(e),
                 },
             }
 
@@ -248,8 +253,11 @@ impl Repository {
     }
 
     pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
-        self.store
-            .check(HashSet::new(), &[self.info.head()], options)?;
+        self.store.check(
+            HashSet::new(),
+            &[self.info.head(), self.info.stage()],
+            options,
+        )?;
 
         Ok(())
     }
@@ -278,6 +286,7 @@ impl Drop for Repository {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RepositoryInfo {
     head: Hash,
+    stage: Hash,
     #[serde(skip)]
     modified: bool,
 }
@@ -285,5 +294,9 @@ pub struct RepositoryInfo {
 impl RepositoryInfo {
     pub fn head(&self) -> Hash {
         self.head
+    }
+
+    pub fn stage(&self) -> Hash {
+        self.stage
     }
 }

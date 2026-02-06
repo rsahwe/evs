@@ -19,6 +19,7 @@ pub enum EvsError {
     RepositoryLocked(TryLockError, PathBuf),
     ObjectNotInStore(String),
     AmbiguousObject(String),
+    RepositoryInfoCorrupt(serde_cbor::Error),
 }
 
 impl Display for EvsError {
@@ -37,6 +38,7 @@ impl Display for EvsError {
             EvsError::AmbiguousObject(hash) => {
                 write!(f, "Name \"{}\" matches more than one object", hash)
             }
+            EvsError::RepositoryInfoCorrupt(err) => write!(f, "Repository info corrupt: {}", err),
         }
     }
 }
