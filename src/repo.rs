@@ -223,7 +223,7 @@ impl Repository {
 
             match Self::open(&path, options) {
                 Ok(repo) => {
-                    verbose!(options, "Found repository at {:?}", path);
+                    verbose!(options, "Found repository at {:?}.", path);
 
                     let _ = ManuallyDrop::new(drop);
 

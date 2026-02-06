@@ -112,9 +112,7 @@ impl Store {
         }
     }
 
-    pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Vec<u8>), EvsError> {
-        //TODO: MAKE LOOKUP DESERIALIZE
-
+    pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Object), EvsError> {
         if size_of_val(id) > size_of::<Hash>() * 2 {
             trace!(options, "Store::lookup(self, <overlength hash>) wrong args");
 
@@ -202,13 +200,18 @@ impl Store {
             EvsError::CorruptStateDetected(CorruptState::InvalidCompression(target.clone(), e))
         })?;
 
-        verbose!(options, "Decompressed to size {}", decompressed.len());
+        verbose!(options, "Decompressed to size {}.", decompressed.len());
+
+        let deserialized =
+            serde_cbor::from_slice::<Object>(&decompressed).map_err(|e| (e, real_hash))?;
+
+        verbose!(options, "Deserialized successfully.");
 
         let _ = ManuallyDrop::new(drop);
 
         trace!(options, "Store::lookup(self, ...) done");
 
-        Ok((real_hash, decompressed))
+        Ok((real_hash, deserialized))
     }
 
     pub fn check(
@@ -257,8 +260,6 @@ impl Store {
             }
 
             let (hash, obj) = self.lookup(name.to_str().unwrap(), options)?;
-
-            let obj = serde_cbor::from_slice::<Object>(&obj).map_err(|e| (e, hash))?;
 
             verbose!(options, "Validated {}.", HashDisplay(&hash));
 
