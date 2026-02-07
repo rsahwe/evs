@@ -1,6 +1,8 @@
+use std::{fmt::Display, ops::Deref};
+
 use serde::{Deserialize, Serialize};
 
-use crate::store::Hash;
+use crate::store::{Hash, HashDisplay};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TreeEntry {
@@ -23,4 +25,39 @@ pub enum Object {
     Blob(Vec<u8>),
     Tree(Vec<TreeEntry>),
     Commit(Commit),
+}
+
+impl Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Object::Null => write!(f, "Null object :)"),
+            Object::Blob(items) => write!(f, "Blob:\n{}", items.deref().escape_ascii()),
+            Object::Tree(items) => {
+                if items.len() == 0 {
+                    write!(f, "Empty tree :)")
+                } else {
+                    write!(f, "Tree:")?;
+
+                    for item in items {
+                        write!(
+                            f,
+                            "- \"{}\" {}",
+                            HashDisplay(&item.content),
+                            item.name.deref().escape_ascii()
+                        )?;
+                    }
+
+                    Ok(())
+                }
+            }
+            Object::Commit(commit) => write!(
+                f,
+                "Commit by {} <{}> with state \"{}\":\n\n{}",
+                commit.name,
+                commit.email,
+                HashDisplay(&commit.tree),
+                commit.msg
+            ),
+        }
+    }
 }

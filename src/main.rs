@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{io::stdout, path::Path};
 
 use clap::Parser;
 use evs::{
@@ -6,6 +6,7 @@ use evs::{
     error::EvsError,
     log, none,
     repo::Repository,
+    store::HashDisplay,
 };
 
 fn main() {
@@ -42,6 +43,27 @@ fn main() {
                 drop(repo);
 
                 none!("Repository checked successfully.");
+            }
+            Commands::Cat { raw, r#ref } => {
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let repo = Repository::find(".", &cli)?;
+
+                log!(&cli, "Found repository at {:?}.", repo.repository);
+
+                let (hash, obj) = repo.store.lookup(&r#ref, &cli)?;
+
+                log!(&cli, "Printing object \"{}\":", HashDisplay(&hash));
+
+                if !raw {
+                    println!("{}", obj);
+                } else {
+                    serde_cbor::to_writer(stdout(), &obj).expect("cbor failed");
+                }
             }
         }
 

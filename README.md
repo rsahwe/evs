@@ -30,8 +30,10 @@ for more details.
 
 - [x] `evs init`
 - [x] `evs check`
+- [x] `evs cat`
 - [ ] `evs add`
 - [ ] `evs sub`
+- [ ] `evs commit`
 - [ ] `evs gc`
     > Needs good warning/user interaction
 - [ ] `evs clone`

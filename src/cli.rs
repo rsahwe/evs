@@ -30,4 +30,11 @@ pub enum Commands {
     },
     /// Checks the evs store for validity and completeness.
     Check,
+    /// Prints the given object from the store.
+    Cat {
+        /// Prints the raw bytes of an object in cbor format.
+        #[arg(short, long, default_value_t = false)]
+        raw: bool,
+        r#ref: String,
+    },
 }

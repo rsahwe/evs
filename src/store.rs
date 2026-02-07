@@ -79,7 +79,7 @@ impl Store {
 
         let hash_display = format!("{}", HashDisplay(&hash));
 
-        verbose!(options, "Data hashed to {}.", hash_display);
+        verbose!(options, "Data hashed to \"{}\".", hash_display);
 
         let target = self.path.join(&hash_display);
 
@@ -136,7 +136,7 @@ impl Store {
 
         let mut target = None;
 
-        if size_of_val(id) < size_of::<Hash>() * 2 {
+        if size_of_val(id) == size_of::<Hash>() * 2 {
             let path = self.path.join(id);
 
             target = fs::exists(&path).is_ok().then_some(path);
@@ -261,7 +261,7 @@ impl Store {
 
             let (hash, obj) = self.lookup(name.to_str().unwrap(), options)?;
 
-            verbose!(options, "Validated {}.", HashDisplay(&hash));
+            verbose!(options, "Validated \"{}\".", HashDisplay(&hash));
 
             match obj {
                 Object::Null => verbose!(options, "Found the NULL object! :)"),
@@ -272,7 +272,7 @@ impl Store {
                     for item in items {
                         verbose!(
                             options,
-                            "Requiring {} for {}.",
+                            "Requiring \"{}\" for \"{}\".",
                             HashDisplay(&item.content),
                             HashDisplay(&hash)
                         );
@@ -283,13 +283,13 @@ impl Store {
                 Object::Commit(commit) => {
                     verbose!(
                         options,
-                        "Found commit with state {}.",
+                        "Found commit with state \"{}\".",
                         HashDisplay(&commit.tree)
                     );
 
                     verbose!(
                         options,
-                        "Requiring {} for {}.",
+                        "Requiring \"{}\" for \"{}\".",
                         HashDisplay(&commit.tree),
                         HashDisplay(&hash)
                     );
