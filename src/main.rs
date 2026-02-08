@@ -1,4 +1,8 @@
-use std::{io::stdout, path::Path, time::SystemTime};
+use std::{
+    io::{Write, stdout},
+    path::Path,
+    time::SystemTime,
+};
 
 use clap::Parser;
 use evs::{
@@ -64,7 +68,11 @@ fn main() {
                 if !raw {
                     println!("{}", obj);
                 } else {
-                    serde_cbor::to_writer(stdout(), &obj).expect("cbor failed");
+                    let content = rmp_serde::to_vec(&obj).expect("msgpack failed");
+
+                    stdout()
+                        .write_all(&content)
+                        .expect("write to stdout failed");
                 }
             }
             Commands::Add { paths } => {

@@ -110,7 +110,7 @@ impl Repository {
             .map_err(|e| (e, lockfile_path.clone()))?;
 
         let repo_info =
-            serde_cbor::from_slice(&repo_info).map_err(|e| EvsError::RepositoryInfoCorrupt(e))?;
+            rmp_serde::from_slice(&repo_info).map_err(|e| EvsError::RepositoryInfoCorrupt(e))?;
 
         verbose!(options, "Read repository info successfully.");
 
@@ -195,7 +195,7 @@ impl Repository {
         };
 
         lockfile
-            .write_all(&serde_cbor::to_vec(&repo_info).expect("cbor failed"))
+            .write_all(&rmp_serde::to_vec(&repo_info).expect("msgpack failed"))
             .map_err(|e| (e, lockfile_path.clone()))?;
 
         verbose!(options, "Wrote repository info into the lockfile.");
@@ -729,7 +729,7 @@ impl Drop for Repository {
                 self.lockfile.set_len(0)?;
                 self.lockfile.seek(SeekFrom::Start(0))?;
                 self.lockfile
-                    .write_all(&serde_cbor::to_vec(&self.info).expect("cbor failed"))?;
+                    .write_all(&rmp_serde::to_vec(&self.info).expect("msgpack failed"))?;
             }
 
             Ok(())

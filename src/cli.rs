@@ -32,7 +32,7 @@ pub enum Commands {
     Check,
     /// Prints the given object from the store.
     Cat {
-        /// Prints the raw bytes of an object in cbor format.
+        /// Prints the raw bytes of an object in msgpack format.
         #[arg(short, long, default_value_t = false)]
         raw: bool,
         r#ref: String,

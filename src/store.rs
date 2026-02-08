@@ -61,7 +61,7 @@ impl Store {
             _ => (),
         }
 
-        let data = serde_cbor::to_vec(&obj).expect("cbor failed");
+        let data = rmp_serde::to_vec(&obj).expect("msgpack failed");
 
         verbose!(options, "Serialized object to size {}", data.len());
 
@@ -217,7 +217,7 @@ impl Store {
         verbose!(options, "Validated hash.");
 
         let deserialized =
-            serde_cbor::from_slice::<Object>(&decompressed).map_err(|e| (e, real_hash))?;
+            rmp_serde::from_slice::<Object>(&decompressed).map_err(|e| (e, real_hash))?;
 
         verbose!(options, "Deserialized successfully.");
 

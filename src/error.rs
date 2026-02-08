@@ -20,7 +20,7 @@ pub enum EvsError {
     RepositoryLocked(TryLockError, PathBuf),
     ObjectNotInStore(String),
     AmbiguousObject(String, OsString),
-    RepositoryInfoCorrupt(serde_cbor::Error),
+    RepositoryInfoCorrupt(rmp_serde::decode::Error),
     PathOutsideOfRepo(PathBuf),
     IntegerParseError(ParseIntError),
     NotACommit(Hash),
@@ -74,8 +74,8 @@ impl From<(TryLockError, PathBuf)> for EvsError {
     }
 }
 
-impl From<(serde_cbor::Error, Hash)> for EvsError {
-    fn from(value: (serde_cbor::Error, Hash)) -> Self {
+impl From<(rmp_serde::decode::Error, Hash)> for EvsError {
+    fn from(value: (rmp_serde::decode::Error, Hash)) -> Self {
         EvsError::CorruptStateDetected(CorruptState::InvalidObjectContent(value.1, value.0))
     }
 }
@@ -92,7 +92,7 @@ pub enum CorruptState {
     ),
     InvalidCompression(PathBuf, io::Error),
     MissingObjects(Hash, usize),
-    InvalidObjectContent(Hash, serde_cbor::Error),
+    InvalidObjectContent(Hash, rmp_serde::decode::Error),
 }
 
 impl Display for CorruptState {
