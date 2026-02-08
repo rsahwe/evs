@@ -97,7 +97,7 @@ impl Display for CorruptState {
             }
             CorruptState::HashMismatch(found, real) => write!(
                 f,
-                "Object \"{:?}\" seemingly contains object \"{}\"",
+                "Object {:?} seemingly contains object \"{}\"",
                 found,
                 HashDisplay(real)
             ),

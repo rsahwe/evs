@@ -36,7 +36,7 @@ impl Display for Object {
                 if items.len() == 0 {
                     write!(f, "Empty tree :)")
                 } else {
-                    writeln!(f, "Tree:")?;
+                    write!(f, "Tree:")?;
 
                     for item in items {
                         write!(

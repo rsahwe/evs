@@ -65,6 +65,12 @@ impl Store {
 
         verbose!(options, "Serialized object to size {}", data.len());
 
+        let hash: Hash = Sha256::digest(&data).into();
+
+        let hash_display = format!("{}", HashDisplay(&hash));
+
+        verbose!(options, "Data hashed to \"{}\".", hash_display);
+
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
 
         encoder
@@ -81,12 +87,6 @@ impl Store {
             data.len(),
             compressed.len()
         );
-
-        let hash: Hash = Sha256::digest(&compressed).into();
-
-        let hash_display = format!("{}", HashDisplay(&hash));
-
-        verbose!(options, "Data hashed to \"{}\".", hash_display);
 
         let target = self.path.join(&hash_display);
 
@@ -195,15 +195,6 @@ impl Store {
 
         verbose!(options, "Read object of compressed size {}.", content.len());
 
-        let real_hash: Hash = Sha256::digest(&content).into();
-
-        if *target_name != *format!("{}", HashDisplay(&real_hash)) {
-            return Err(EvsError::CorruptStateDetected(CorruptState::HashMismatch(
-                target_name.to_owned(),
-                real_hash.to_vec(),
-            )));
-        }
-
         let mut decoder = GzDecoder::new(&*content);
 
         let mut decompressed = vec![];
@@ -213,6 +204,17 @@ impl Store {
         })?;
 
         verbose!(options, "Decompressed to size {}.", decompressed.len());
+
+        let real_hash: Hash = Sha256::digest(&decompressed).into();
+
+        if *target_name != *format!("{}", HashDisplay(&real_hash)) {
+            return Err(EvsError::CorruptStateDetected(CorruptState::HashMismatch(
+                target_name.to_owned(),
+                real_hash.to_vec(),
+            )));
+        }
+
+        verbose!(options, "Validated hash.");
 
         let deserialized =
             serde_cbor::from_slice::<Object>(&decompressed).map_err(|e| (e, real_hash))?;
