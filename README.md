@@ -31,8 +31,8 @@ for more details.
 - [x] `evs init`
 - [x] `evs check`
 - [x] `evs cat`
-- [ ] `evs add`
-- [ ] `evs sub`
+- [x] `evs add`
+- [x] `evs sub`
 - [ ] `evs commit`
 - [ ] `evs log`
 - [ ] Maybe create and maintain db of store for more efficient garbage collection?

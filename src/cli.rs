@@ -41,4 +41,7 @@ pub enum Commands {
     Add {
         paths: Vec<PathBuf>,
     },
+    Sub {
+        paths: Vec<PathBuf>,
+    },
 }

@@ -306,7 +306,7 @@ impl Repository {
             .unwrap();
 
         let hash = if canon.is_dir() {
-            let hash = self.hash_dir(&canon)?;
+            let hash = self.hash_dir(&canon, options)?;
 
             if relative == "" {
                 verbose!(options, "Hashed contents of path.");
@@ -357,6 +357,65 @@ impl Repository {
         let _ = ManuallyDrop::new(drop);
 
         trace!(options, "Repository::add(...) done");
+
+        Ok(())
+    }
+
+    pub fn sub(&mut self, path: impl AsRef<Path>, options: &Cli) -> Result<(), EvsError> {
+        trace!(options, "Repository::sub({:?})", path.as_ref());
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::sub(...) error");
+        });
+
+        let canon = path
+            .as_ref()
+            .canonicalize()
+            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+
+        verbose!(options, "Canonicalized path to {:?}", canon);
+
+        if !canon.starts_with(
+            self.repository
+                .parent()
+                .expect("repository should have parent"),
+        ) {
+            return Err(EvsError::PathOutsideOfRepo(canon));
+        }
+
+        if canon.starts_with(&self.repository) {
+            return Err(EvsError::PathOutsideOfRepo(canon));
+        }
+
+        let relative = canon
+            .strip_prefix(self.repository.parent().unwrap())
+            .unwrap();
+
+        let new_stage = if relative == "" {
+            self.store.insert(Object::Tree(vec![]), options)?
+        } else {
+            match self.update_stage(
+                relative.components().peekable(),
+                None,
+                self.info.stage(),
+                options,
+            )? {
+                Some(stage) => stage,
+                None => self.store.insert(Object::Tree(vec![]), options)?,
+            }
+        };
+
+        verbose!(options, "Recomputed stage.");
+
+        if self.info.stage() == new_stage {
+            verbose!(options, "New stage is equal to old stage.")
+        } else {
+            self.info.set_stage(new_stage);
+        }
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::sub(...) done");
 
         Ok(())
     }
@@ -485,8 +544,57 @@ impl Repository {
         Ok(hash)
     }
 
-    fn hash_dir(&self, path: &PathBuf) -> Result<Hash, EvsError> {
-        todo!("Hash directory {:?}", path)
+    fn hash_dir(&self, path: &PathBuf, options: &Cli) -> Result<Hash, EvsError> {
+        trace!(options, "Repository::hash_dir({:?})", path);
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::hash_dir(...) error");
+        });
+
+        let res = if !path.is_dir() {
+            let content = fs::read(path).map_err(|e| (e, path.to_owned()))?;
+
+            verbose!(options, "Read blob, inserting...");
+
+            self.store.insert(Object::Blob(content), options)?
+        } else {
+            let mut items = vec![];
+
+            for child in path.read_dir().map_err(|e| (e, path.to_owned()))? {
+                let child = child.map_err(|e| (e, path.to_owned()))?;
+
+                let name = child.file_name();
+
+                let name_bytes = name.as_encoded_bytes().to_owned();
+
+                let next = path.join(&name);
+
+                if next.starts_with(&self.repository) {
+                    verbose!(options, "Skipping repository...");
+
+                    continue;
+                }
+
+                let hash = self.hash_dir(&next, options)?;
+
+                verbose!(options, "Hashed child {:?}.", name);
+
+                items.push(TreeEntry {
+                    name: name_bytes,
+                    content: hash,
+                });
+            }
+
+            verbose!(options, "Inserting resulting tree...");
+
+            self.store.insert(Object::Tree(items), options)?
+        };
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::hash_dir(...) done");
+
+        Ok(res)
     }
 }
 

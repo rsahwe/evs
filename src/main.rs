@@ -88,6 +88,27 @@ fn main() {
 
                 log!(&cli, "Finished adding.")
             }
+            Commands::Sub { paths } => {
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let mut repo = Repository::find(".", &cli)?;
+
+                log!(&cli, "Found repository at {:?}.", repo.repository);
+
+                verbose!(&cli, "Removing {} paths:", paths.len());
+
+                for file in paths {
+                    repo.sub(file, &cli)?;
+
+                    log!(&cli, "Removed {:?}", file);
+                }
+
+                log!(&cli, "Finished removing.")
+            }
         }
 
         Ok(())
