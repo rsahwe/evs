@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Deref};
+use std::{fmt::Display, ops::Deref, time::SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,10 +13,12 @@ pub struct TreeEntry {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Commit {
+    pub parent: Hash,
     pub name: String,
     pub email: String,
     pub tree: Hash,
     pub msg: String,
+    pub date: SystemTime,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -52,10 +54,12 @@ impl Display for Object {
             }
             Object::Commit(commit) => write!(
                 f,
-                "Commit by {} <{}> with state \"{}\":\n\n{}",
+                "Commit by {} <{}> at {:?} with state \"{}\" with parent \"{}\":\n\n{}",
                 commit.name,
                 commit.email,
+                commit.date,
                 HashDisplay(&commit.tree),
+                HashDisplay(&commit.parent),
                 commit.msg
             ),
         }

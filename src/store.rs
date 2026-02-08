@@ -297,8 +297,9 @@ impl Store {
                 Object::Commit(commit) => {
                     verbose!(
                         options,
-                        "Found commit with state \"{}\".",
-                        HashDisplay(&commit.tree)
+                        "Found commit with state \"{}\" and parent \"{}\".",
+                        HashDisplay(&commit.tree),
+                        HashDisplay(&commit.parent)
                     );
 
                     verbose!(
@@ -309,6 +310,15 @@ impl Store {
                     );
 
                     required.insert(commit.tree);
+
+                    verbose!(
+                        options,
+                        "Requiring \"{}\" for \"{}\".",
+                        HashDisplay(&commit.parent),
+                        HashDisplay(&hash)
+                    );
+
+                    required.insert(commit.parent);
                 }
             }
 

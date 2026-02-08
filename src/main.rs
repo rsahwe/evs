@@ -1,4 +1,4 @@
-use std::{io::stdout, path::Path};
+use std::{io::stdout, path::Path, time::SystemTime};
 
 use clap::Parser;
 use evs::{
@@ -57,7 +57,7 @@ fn main() {
 
                 log!(&cli, "Found repository at {:?}.", repo.repository);
 
-                let (hash, obj) = repo.store.lookup(&r#ref, &cli)?;
+                let (hash, obj) = repo.lookup(r#ref, &cli)?;
 
                 log!(&cli, "Printing object \"{}\":", HashDisplay(&hash));
 
@@ -108,6 +108,59 @@ fn main() {
                 }
 
                 log!(&cli, "Finished removing.")
+            }
+            Commands::Commit {
+                message,
+                name,
+                email,
+            } => {
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let mut repo = Repository::find(".", &cli)?;
+
+                log!(&cli, "Found repository at {:?}.", repo.repository);
+
+                let time = SystemTime::now();
+
+                verbose!(
+                    &cli,
+                    "Committing by {} <{}> at {:?} with message of length {}",
+                    name,
+                    email,
+                    time,
+                    message.len()
+                );
+
+                let commit = repo.commit(
+                    message.to_owned(),
+                    name.to_owned(),
+                    email.to_owned(),
+                    time,
+                    &cli,
+                )?;
+
+                log!(&cli, "Finished committing.");
+
+                none!("HEAD is now at \"{}\".", HashDisplay(&commit));
+            }
+            Commands::Log { r#ref, limit } => {
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let repo = Repository::find(".", &cli)?;
+
+                log!(&cli, "Found repository at {:?}.", repo.repository);
+
+                repo.log(r#ref, *limit, &cli)?;
+
+                log!(&cli, "Finished printing log.");
             }
         }
 

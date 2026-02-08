@@ -33,12 +33,16 @@ for more details.
 - [x] `evs cat`
 - [x] `evs add`
 - [x] `evs sub`
-- [ ] `evs commit`
+- [x] `evs commit`
 - [ ] `evs log`
 - [ ] Maybe create and maintain db of store for more efficient garbage collection?
 - [ ] `evs gc`
     > Needs good warning/user interaction
+- [ ] Maybe change serialization format to something more efficient?
 - [ ] `evs clone`
+- [ ] `evs checkout`
+- [ ] `evs status`
+- [ ] `evs diff`
 - [ ] Remote tools for evs
 - [ ] Branch tools for evs
 - [ ] ...

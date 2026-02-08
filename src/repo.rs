@@ -5,6 +5,7 @@ use std::{
     iter::Peekable,
     mem::ManuallyDrop,
     path::{Components, Path, PathBuf},
+    time::SystemTime,
 };
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use crate::{
     cli::Cli,
     error::{CorruptState, EvsError},
     none,
-    objects::{Object, TreeEntry},
+    objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
     trace,
     util::DropAction,
@@ -235,7 +236,7 @@ impl Repository {
 
             match Self::open(&path, options) {
                 Ok(repo) => {
-                    verbose!(options, "Found repository at {:?}.", path);
+                    verbose!(options, "Found repository in {:?}.", path);
 
                     let _ = ManuallyDrop::new(drop);
 
@@ -596,6 +597,129 @@ impl Repository {
 
         Ok(res)
     }
+
+    pub fn commit(
+        &mut self,
+        message: String,
+        name: String,
+        email: String,
+        time: SystemTime,
+        options: &Cli,
+    ) -> Result<Hash, EvsError> {
+        trace!(
+            options,
+            "Repository::commit(<msg of len {}>, {}, {}, {:?})",
+            message.len(),
+            name,
+            email,
+            time
+        );
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::commit(...) error");
+        });
+
+        let commit = self.store.insert(
+            Object::Commit(Commit {
+                parent: self.info.head(),
+                name,
+                email,
+                tree: self.info.stage(),
+                msg: message,
+                date: time,
+            }),
+            options,
+        )?;
+
+        verbose!(options, "Created and inserted commit object.");
+
+        self.info.set_head(commit);
+
+        verbose!(options, "Moved head to \"{}\".", HashDisplay(&commit));
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::commit(...) done");
+
+        Ok(commit)
+    }
+
+    pub fn lookup(
+        &self,
+        r#ref: impl AsRef<str>,
+        options: &Cli,
+    ) -> Result<(Hash, Object), EvsError> {
+        trace!(options, "Repository::lookup(\"{}\")", r#ref.as_ref());
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::lookup(...) error");
+        });
+
+        let resolved = self.resolve(r#ref, options)?;
+
+        verbose!(options, "Resolved to \"{}\".", resolved);
+
+        let result = self.store.lookup(resolved.as_str(), options)?;
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::lookup(...) done");
+
+        Ok(result)
+    }
+
+    pub fn log(&self, r#ref: impl AsRef<str>, limit: usize, options: &Cli) -> Result<(), EvsError> {
+        todo!(
+            "log from {} (max {}) with verbose {}",
+            r#ref.as_ref(),
+            limit,
+            options.verbose
+        )
+    }
+
+    pub fn resolve(&self, r#ref: impl AsRef<str>, options: &Cli) -> Result<String, EvsError> {
+        trace!(options, "Repository::resolve({})", r#ref.as_ref());
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::resolve(...) error");
+        });
+
+        let (first, back_count) = r#ref
+            .as_ref()
+            .split_once('~')
+            .unwrap_or((r#ref.as_ref(), "0"));
+
+        let back_count = back_count
+            .parse::<usize>()
+            .map_err(|e| EvsError::IntegerParseError(e))?;
+
+        let first = match first {
+            "HEAD" => format!("{}", HashDisplay(&self.info.head())),
+            first => first.to_owned(),
+        };
+
+        verbose!(options, "Starting at \"{}\".", first);
+
+        let mut resolved = first;
+
+        for _ in 0..back_count {
+            let (hash, commit) = self.store.lookup(resolved.as_str(), options)?;
+
+            resolved = match commit {
+                Object::Commit(Commit { parent, .. }) => format!("{}", HashDisplay(&parent)),
+                Object::Null => return Err(EvsError::NoPreviousCommit),
+                _ => return Err(EvsError::NotACommit(hash)),
+            };
+
+            verbose!(options, "Gone back to \"{}\".", HashDisplay(&hash))
+        }
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::resolve(...) done");
+
+        Ok(resolved)
+    }
 }
 
 impl Drop for Repository {
@@ -629,6 +753,11 @@ pub struct RepositoryInfo {
 impl RepositoryInfo {
     pub fn head(&self) -> Hash {
         self.head
+    }
+
+    pub fn set_head(&mut self, new_head: Hash) {
+        self.head = new_head;
+        self.modified = true;
     }
 
     pub fn stage(&self) -> Hash {

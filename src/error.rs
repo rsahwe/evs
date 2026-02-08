@@ -4,6 +4,7 @@ use std::{
     fmt::{Debug, Display},
     fs::TryLockError,
     io,
+    num::ParseIntError,
     ops::Deref,
     path::PathBuf,
 };
@@ -21,6 +22,9 @@ pub enum EvsError {
     AmbiguousObject(String, OsString),
     RepositoryInfoCorrupt(serde_cbor::Error),
     PathOutsideOfRepo(PathBuf),
+    IntegerParseError(ParseIntError),
+    NotACommit(Hash),
+    NoPreviousCommit,
 }
 
 impl Display for EvsError {
@@ -47,6 +51,11 @@ impl Display for EvsError {
             EvsError::PathOutsideOfRepo(err) => {
                 write!(f, "Path {:?} is outside of the repository.", err)
             }
+            EvsError::IntegerParseError(err) => write!(f, "Could not parse integer: {}", err),
+            EvsError::NotACommit(hash) => {
+                write!(f, "Object \"{}\" is not a commit", HashDisplay(hash))
+            }
+            EvsError::NoPreviousCommit => write!(f, "NULL object does not have a previous commit"),
         }
     }
 }

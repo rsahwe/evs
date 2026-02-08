@@ -41,7 +41,29 @@ pub enum Commands {
     Add {
         paths: Vec<PathBuf>,
     },
+    /// Removes the given files and directories from the evs stage
     Sub {
         paths: Vec<PathBuf>,
+    },
+    /// Commits the current stage to the commit chain.
+    Commit {
+        /// The commit message, currently not optional.
+        #[arg(short, long)]
+        message: String,
+        /// The committer name, currently not optional.
+        #[arg(short, long)]
+        name: String,
+        /// The committer email, currently not optional.
+        #[arg(short, long)]
+        email: String,
+    },
+    /// Prints the commit log of a commit.
+    Log {
+        /// The maximum number of commits to log.
+        #[arg(short, long, default_value_t = 5)]
+        limit: usize,
+        /// The commit to start the log from.
+        #[arg(default_value = "HEAD")]
+        r#ref: String,
     },
 }
