@@ -37,4 +37,8 @@ pub enum Commands {
         raw: bool,
         r#ref: String,
     },
+    /// Adds the given files and directories to the evs store and stage
+    Add {
+        paths: Vec<PathBuf>,
+    },
 }

@@ -36,12 +36,12 @@ impl Display for Object {
                 if items.len() == 0 {
                     write!(f, "Empty tree :)")
                 } else {
-                    write!(f, "Tree:")?;
+                    writeln!(f, "Tree:")?;
 
                     for item in items {
                         write!(
                             f,
-                            "- \"{}\" {}",
+                            "\n- \"{}\" {}",
                             HashDisplay(&item.content),
                             item.name.deref().escape_ascii()
                         )?;

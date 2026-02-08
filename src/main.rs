@@ -7,9 +7,11 @@ use evs::{
     log, none,
     repo::Repository,
     store::HashDisplay,
+    verbose,
 };
 
 fn main() {
+    //TODO: MOVE INTO LIB
     if let Err(e) = || -> Result<(), EvsError> {
         let cli = Cli::parse();
 
@@ -64,6 +66,27 @@ fn main() {
                 } else {
                     serde_cbor::to_writer(stdout(), &obj).expect("cbor failed");
                 }
+            }
+            Commands::Add { paths } => {
+                log!(
+                    &cli,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let mut repo = Repository::find(".", &cli)?;
+
+                log!(&cli, "Found repository at {:?}.", repo.repository);
+
+                verbose!(&cli, "Adding {} paths:", paths.len());
+
+                for file in paths {
+                    repo.add(file, &cli)?;
+
+                    log!(&cli, "Added {:?}", file);
+                }
+
+                log!(&cli, "Finished adding.")
             }
         }
 

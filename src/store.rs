@@ -47,21 +47,28 @@ impl Store {
     }
 
     /// Assumes a valid store and might cause unintended behaviour
-    pub fn insert(&self, data: &[u8], options: &Cli) -> Result<Hash, EvsError> {
-        trace!(
-            options,
-            "Store::insert(self, <data of size {}>)",
-            data.len()
-        );
+    pub fn insert(&self, mut obj: Object, options: &Cli) -> Result<Hash, EvsError> {
+        trace!(options, "Store::insert(self, ...)");
 
         let drop = DropAction(|| {
             trace!(options, "Store::insert(self, ...) error");
         });
 
+        match &mut obj {
+            Object::Tree(entries) => {
+                entries.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            _ => (),
+        }
+
+        let data = serde_cbor::to_vec(&obj).expect("cbor failed");
+
+        verbose!(options, "Serialized object to size {}", data.len());
+
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
 
         encoder
-            .write_all(data)
+            .write_all(&data)
             .expect("gzip encoder failed: io error on vec");
 
         let compressed = encoder
@@ -83,13 +90,13 @@ impl Store {
 
         let target = self.path.join(&hash_display);
 
-        if target.exists() {
+        let hash = if target.exists() {
             verbose!(
                 options,
                 "Object path exists! TODO: Maybe figure out strategy for this."
             );
 
-            Ok(hash)
+            hash
         } else {
             verbose!(options, "Object path does not exist, inserting...");
 
@@ -104,12 +111,14 @@ impl Store {
 
             verbose!(options, "Wrote object to store.");
 
-            let _ = ManuallyDrop::new(drop);
+            hash
+        };
 
-            trace!(options, "Store::insert(self, ...) done");
+        let _ = ManuallyDrop::new(drop);
 
-            Ok(hash)
-        }
+        trace!(options, "Store::insert(self, ...) done");
+
+        Ok(hash)
     }
 
     pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Object), EvsError> {
@@ -149,8 +158,11 @@ impl Store {
                 if let Some(hash) = name.file_name()
                     && hash.as_encoded_bytes().starts_with(id.as_bytes())
                 {
-                    if target.is_some() {
-                        return Err(EvsError::AmbiguousObject(id.to_owned()));
+                    if let Some(target) = target {
+                        return Err(EvsError::AmbiguousObject(
+                            id.to_owned(),
+                            target.file_name().unwrap().to_os_string(),
+                        ));
                     }
 
                     target = Some(name);
@@ -267,7 +279,7 @@ impl Store {
                 Object::Null => verbose!(options, "Found the NULL object! :)"),
                 Object::Blob(data) => verbose!(options, "Found blob of size {}.", data.len()),
                 Object::Tree(items) => {
-                    verbose!(options, "Found tree with {} children.", items.len());
+                    verbose!(options, "Found tree with {} child(ren).", items.len());
 
                     for item in items {
                         verbose!(

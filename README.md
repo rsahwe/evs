@@ -34,6 +34,8 @@ for more details.
 - [ ] `evs add`
 - [ ] `evs sub`
 - [ ] `evs commit`
+- [ ] `evs log`
+- [ ] Maybe create and maintain db of store for more efficient garbage collection?
 - [ ] `evs gc`
     > Needs good warning/user interaction
 - [ ] `evs clone`

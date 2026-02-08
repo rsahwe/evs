@@ -18,8 +18,9 @@ pub enum EvsError {
     RepositoryNotFound,
     RepositoryLocked(TryLockError, PathBuf),
     ObjectNotInStore(String),
-    AmbiguousObject(String),
+    AmbiguousObject(String, OsString),
     RepositoryInfoCorrupt(serde_cbor::Error),
+    PathOutsideOfRepo(PathBuf),
 }
 
 impl Display for EvsError {
@@ -35,10 +36,17 @@ impl Display for EvsError {
             EvsError::ObjectNotInStore(hash) => {
                 write!(f, "Could not find object \"{}\" in store", hash)
             }
-            EvsError::AmbiguousObject(hash) => {
-                write!(f, "Name \"{}\" matches more than one object", hash)
+            EvsError::AmbiguousObject(hash, target) => {
+                write!(
+                    f,
+                    "Name \"{}\" matches more than one object (e.g. {:?})",
+                    hash, target
+                )
             }
             EvsError::RepositoryInfoCorrupt(err) => write!(f, "Repository info corrupt: {}", err),
+            EvsError::PathOutsideOfRepo(err) => {
+                write!(f, "Path {:?} is outside of the repository.", err)
+            }
         }
     }
 }
