@@ -736,7 +736,7 @@ impl Repository {
                 _ => return Err(EvsError::NotACommit(hash)),
             };
 
-            verbose!(options, "Gone back to \"{}\".", HashDisplay(&hash))
+            verbose!(options, "Gone back to \"{}\".", resolved)
         }
 
         let _ = ManuallyDrop::new(drop);
