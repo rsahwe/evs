@@ -669,16 +669,41 @@ impl Repository {
     }
 
     pub fn log(&self, r#ref: impl AsRef<str>, limit: usize, options: &Cli) -> Result<(), EvsError> {
-        todo!(
-            "log from {} (max {}) with verbose {}",
-            r#ref.as_ref(),
-            limit,
-            options.verbose
-        )
+        trace!(options, "Repository::log(\"{}\")", r#ref.as_ref());
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::log(...) error");
+        });
+
+        let mut resolved = self.resolve(r#ref, options)?;
+
+        verbose!(options, "Resolved to \"{}\".", resolved);
+
+        for _ in 0..limit {
+            let (hash, commit) = self.store.lookup(&resolved, options)?;
+
+            match commit {
+                Object::Null => break,
+                Object::Commit(Commit { parent, .. }) => {
+                    println!("{}:\n{}", HashDisplay(&hash), commit);
+
+                    resolved = format!("{}", HashDisplay(&parent));
+                }
+                _ => return Err(EvsError::NotACommit(hash)),
+            }
+
+            verbose!(options, "Continuing with \"{}\"", resolved);
+        }
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::log(...) done");
+
+        Ok(())
     }
 
     pub fn resolve(&self, r#ref: impl AsRef<str>, options: &Cli) -> Result<String, EvsError> {
-        trace!(options, "Repository::resolve({})", r#ref.as_ref());
+        trace!(options, "Repository::resolve(\"{}\")", r#ref.as_ref());
 
         let drop = DropAction(|| {
             trace!(options, "Repository::resolve(...) error");

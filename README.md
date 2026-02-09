@@ -34,11 +34,12 @@ for more details.
 - [x] `evs add`
 - [x] `evs sub`
 - [x] `evs commit`
-- [ ] `evs log`
+- [x] `evs log`
 - [ ] Maybe create and maintain db of store for more efficient garbage collection?
 - [ ] `evs gc`
     > Needs good warning/user interaction
-- [ ] Maybe change serialization format to something more efficient?
+- [x] Maybe change serialization format to something more efficient?
+    > msgpack instead of cbor
 - [ ] `evs clone`
 - [ ] `evs checkout`
 - [ ] `evs status`
