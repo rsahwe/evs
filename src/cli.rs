@@ -1,6 +1,12 @@
-use std::path::PathBuf;
+use std::{
+    io::{Write, stdout},
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 use clap::{ArgAction, Parser, Subcommand};
+
+use crate::{error::EvsError, log, none, repo::Repository, store::HashDisplay, verbose};
 
 pub const VERBOSITY_NONE: u8 = 0;
 pub const VERBOSITY_LOG: u8 = 1;
@@ -66,4 +72,131 @@ pub enum Commands {
         #[arg(default_value = "HEAD")]
         r#ref: String,
     },
+}
+
+impl Cli {
+    pub fn run(self) -> Result<(), EvsError> {
+        macro_rules! get_repo {
+            () => {{
+                log!(
+                    &self,
+                    "Searching for repository starting from {:?}:",
+                    AsRef::<Path>::as_ref(".")
+                );
+
+                let repo = Repository::find(".", &self)?;
+
+                log!(&self, "Found repository at {:?}.", repo.repository);
+
+                repo
+            }};
+        }
+
+        match &self.command {
+            Commands::Init { path } => {
+                let path = path.as_ref().map(ToOwned::to_owned).unwrap_or(".".into());
+
+                log!(&self, "Creating repository at {:?}...", path);
+
+                let repo = Repository::create(path, &self)?;
+
+                log!(&self, "Created repository.");
+
+                drop(repo);
+
+                none!("Repository initialized successfully.");
+            }
+            Commands::Check => {
+                let repo = get_repo!();
+
+                repo.check(&self)?;
+
+                drop(repo);
+
+                none!("Repository checked successfully.");
+            }
+            Commands::Cat { raw, r#ref } => {
+                let repo = get_repo!();
+
+                let (hash, obj) = repo.lookup(r#ref, &self)?;
+
+                log!(&self, "Printing object \"{}\":", HashDisplay(&hash));
+
+                if !raw {
+                    println!("{}", obj);
+                } else {
+                    let content = rmp_serde::to_vec(&obj).expect("msgpack failed");
+
+                    stdout()
+                        .write_all(&content)
+                        .expect("write to stdout failed");
+                }
+            }
+            Commands::Add { paths } => {
+                let mut repo = get_repo!();
+
+                verbose!(&self, "Adding {} paths:", paths.len());
+
+                for file in paths {
+                    repo.add(file, &self)?;
+
+                    log!(&self, "Added {:?}", file);
+                }
+
+                log!(&self, "Finished adding.")
+            }
+            Commands::Sub { paths } => {
+                let mut repo = get_repo!();
+
+                verbose!(&self, "Removing {} paths:", paths.len());
+
+                for file in paths {
+                    repo.sub(file, &self)?;
+
+                    log!(&self, "Removed {:?}", file);
+                }
+
+                log!(&self, "Finished removing.")
+            }
+            Commands::Commit {
+                message,
+                name,
+                email,
+            } => {
+                let mut repo = get_repo!();
+
+                let time = SystemTime::now();
+
+                verbose!(
+                    &self,
+                    "Committing by {} <{}> at {:?} with message of length {}",
+                    name,
+                    email,
+                    time,
+                    message.len()
+                );
+
+                let commit = repo.commit(
+                    message.to_owned(),
+                    name.to_owned(),
+                    email.to_owned(),
+                    time,
+                    &self,
+                )?;
+
+                log!(&self, "Finished committing.");
+
+                none!("HEAD is now at \"{}\".", HashDisplay(&commit));
+            }
+            Commands::Log { r#ref, limit } => {
+                let repo = get_repo!();
+
+                repo.log(r#ref, *limit, &self)?;
+
+                log!(&self, "Finished printing log.");
+            }
+        }
+
+        Ok(())
+    }
 }

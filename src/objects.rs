@@ -54,10 +54,10 @@ impl Display for Object {
             }
             Object::Commit(commit) => write!(
                 f,
-                "Commit by {} <{}> at {:?} with state \"{}\" with parent \"{}\":\n\n{}",
+                "Commit by {} <{}> at {:?}\n- \"{}\" state\n- \"{}\" parent\n{}",
                 commit.name,
                 commit.email,
-                commit.date,
+                commit.date, //TODO: FORMAT DATE BETTER
                 HashDisplay(&commit.tree),
                 HashDisplay(&commit.parent),
                 commit.msg
