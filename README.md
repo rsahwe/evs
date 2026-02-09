@@ -26,6 +26,32 @@ evs check -vvv
 ```
 for more details.
 
+### To print a given store object:
+
+```bash
+evs cat ...
+```
+
+### To add or remove files or directories from the stage:
+
+```bash
+evs add example.txt example.dir
+
+evs sub example.txt example.dir
+```
+
+### To commit the changes from the stage to the current branch (currently only HEAD):
+
+```bash
+evs commit -m message -n name -e email
+```
+
+### To print the commit log (default commit limit is 5):
+
+```bash
+evs log
+```
+
 ## TODO:
 
 - [x] `evs init`
