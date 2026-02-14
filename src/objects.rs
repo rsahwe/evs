@@ -1,6 +1,7 @@
 use std::{fmt::Display, ops::Deref, time::SystemTime};
 
 use serde::{Deserialize, Serialize};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::store::{Hash, HashDisplay};
 
@@ -54,10 +55,12 @@ impl Display for Object {
             }
             Object::Commit(commit) => write!(
                 f,
-                "Commit by {} <{}> at {:?}\n- \"{}\" state\n- \"{}\" parent\n{}",
+                "Commit by {} <{}> at {}\n- \"{}\" state\n- \"{}\" parent\n{}",
                 commit.name,
                 commit.email,
-                commit.date, //TODO: FORMAT DATE BETTER
+                OffsetDateTime::from(commit.date)
+                    .format(&Rfc3339)
+                    .expect("I think this can't fail"),
                 HashDisplay(&commit.tree),
                 HashDisplay(&commit.parent),
                 commit.msg
