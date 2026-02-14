@@ -740,6 +740,8 @@ impl Repository {
             verbose!(options, "Gone back to \"{}\".", resolved)
         }
 
+        let resolved = self.store.resolve_rest(resolved, options)?;
+
         let _ = ManuallyDrop::new(drop);
 
         trace!(options, "Repository::resolve(self, ...) done");

@@ -393,4 +393,74 @@ impl Store {
 
         Ok(())
     }
+
+    pub fn resolve_rest(&self, r#ref: String, options: &Cli) -> Result<String, EvsError> {
+        trace!(options, "Store::resolve_rest(self, \"{}\")", r#ref);
+
+        let drop = DropAction(|| {
+            trace!(options, "Store::resolve_rest(self, ...) error");
+        });
+
+        let mut target = None;
+
+        if size_of_val(r#ref.as_str()) == size_of::<Hash>() * 2 {
+            let path = self.path.join(&r#ref);
+
+            verbose!(options, "Fast lookup of {:?}...", path);
+
+            target = fs::exists(&path).is_ok().then_some(path);
+        } else {
+            verbose!(options, "Slow lookup...");
+
+            for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
+                let obj = obj.map_err(|e| (e, self.path.clone()))?;
+
+                let name = obj.path();
+
+                if let Some(hash) = name.file_name()
+                    && hash.as_encoded_bytes().starts_with(r#ref.as_bytes())
+                {
+                    verbose!(options, "Found {:?}.", hash);
+
+                    if let Some(target) = target {
+                        return Err(EvsError::AmbiguousObject(
+                            r#ref,
+                            target.file_name().unwrap().to_os_string(),
+                        ));
+                    }
+
+                    target = Some(name);
+                }
+            }
+        }
+
+        if target.is_none() {
+            return Err(EvsError::ObjectNotInStore(r#ref));
+        }
+
+        let target = target.unwrap();
+
+        let target_name = target.file_name().unwrap();
+
+        if size_of_val(target_name) != size_of::<Hash>() * 2
+            || !target_name
+                .as_encoded_bytes()
+                .iter()
+                .all(|b| matches!(*b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(EvsError::CorruptStateDetected(
+                CorruptState::InvalidObjectName(target_name.to_owned()),
+            ));
+        }
+
+        verbose!(options, "Validated name successfully.");
+
+        let resolved = target_name.to_str().unwrap().to_owned();
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Store::resolve_rest(self, ...) done");
+
+        Ok(resolved)
+    }
 }
