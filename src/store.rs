@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::Display,
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -232,6 +232,7 @@ impl Store {
         &self,
         mut found: HashSet<Hash>,
         required: impl AsRef<[Hash]>,
+        dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
         options: &Cli,
     ) -> Result<HashSet<Hash>, EvsError> {
         trace!(
@@ -244,14 +245,16 @@ impl Store {
             trace!(options, "Store::check(self, ...) error");
         });
 
-        let mut required = {
+        let (mut required, mut dependencies) = {
             let mut hm = HashSet::new();
+            let mut dep = HashMap::new();
 
             for r in required.as_ref() {
                 hm.insert(*r);
+                dep.insert(*r, 1);
             }
 
-            hm
+            (hm, dep)
         };
 
         verbose!(
@@ -292,6 +295,10 @@ impl Store {
                         );
 
                         required.insert(item.content);
+                        dependencies.insert(
+                            item.content,
+                            dependencies.get(&item.content).unwrap_or(&0) + 1,
+                        );
                     }
                 }
                 Object::Commit(commit) => {
@@ -310,6 +317,10 @@ impl Store {
                     );
 
                     required.insert(commit.tree);
+                    dependencies.insert(
+                        commit.tree,
+                        dependencies.get(&commit.tree).unwrap_or(&0) + 1,
+                    );
 
                     verbose!(
                         options,
@@ -319,18 +330,27 @@ impl Store {
                     );
 
                     required.insert(commit.parent);
+                    dependencies.insert(
+                        commit.parent,
+                        dependencies.get(&commit.parent).unwrap_or(&0) + 1,
+                    );
                 }
             }
 
             found.insert(hash);
         }
 
+        let unnecessary_count = found.difference(&required).fold(0, |acc, n| {
+            dependencies.insert(*n, 0);
+            acc + 1
+        });
+
         verbose!(
             options,
             "Finished validating {}/{} (+{}) objects.",
             required.intersection(&found).count(),
             required.len(),
-            found.difference(&required).count(),
+            unnecessary_count,
         );
 
         let mut missing = required.difference(&found).cloned();
@@ -341,10 +361,36 @@ impl Store {
             ));
         }
 
+        if let Some(dependency_info) = dependency_info {
+            verbose!(options, "Storing dependency info.");
+
+            let _ = dependency_info.insert(dependencies);
+        }
+
         let _ = ManuallyDrop::new(drop);
 
         trace!(options, "Store::check(self, ...) done");
 
         Ok(found)
+    }
+
+    pub fn remove(&self, path: Hash, options: &Cli) -> Result<(), EvsError> {
+        trace!(options, "Store::remove(self, \"{}\")", HashDisplay(&path));
+
+        let drop = DropAction(|| {
+            trace!(options, "Store::remove(self, ...) error");
+        });
+
+        let path = self.path.join(&format!("{}", HashDisplay(&path)));
+
+        verbose!(options, "Deleting {:?}", &path);
+
+        fs::remove_file(&path).map_err(|e| (e, path))?;
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Store::remove(self, ...) done");
+
+        Ok(())
     }
 }

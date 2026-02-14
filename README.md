@@ -52,6 +52,12 @@ evs commit -m message -n name -e email
 evs log
 ```
 
+### To remove unnecessary objects from the evs store:
+
+```
+evs gc
+```
+
 ## TODO:
 
 - [x] `evs init`
@@ -61,9 +67,11 @@ evs log
 - [x] `evs sub`
 - [x] `evs commit`
 - [x] `evs log`
-- [ ] Maybe create and maintain db of store for more efficient garbage collection?
-- [ ] `evs gc`
+- [x] Maybe create and maintain db of store for more efficient garbage collection?
+    > No, found better solution for the moment
+- [x] `evs gc`
     > Needs good warning/user interaction
+- [ ] `evs lookup`
 - [x] Maybe change serialization format to something more efficient?
     > msgpack instead of cbor
 - [ ] `evs clone`

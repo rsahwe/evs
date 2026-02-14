@@ -72,6 +72,8 @@ pub enum Commands {
         #[arg(default_value = "HEAD")]
         r#ref: String,
     },
+    /// Collects all unreferenced store objects and deletes them.
+    Gc,
 }
 
 impl Cli {
@@ -194,6 +196,13 @@ impl Cli {
                 repo.log(r#ref, *limit, &self)?;
 
                 log!(&self, "Finished printing log.");
+            }
+            Commands::Gc => {
+                let repo = get_repo!();
+
+                repo.gc(&self)?;
+
+                log!(&self, "Finished collecting garbage.");
             }
         }
 
