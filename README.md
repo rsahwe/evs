@@ -54,8 +54,14 @@ evs log
 
 ### To remove unnecessary objects from the evs store:
 
-```
+```bash
 evs gc
+```
+
+### To just print the resolved object name:
+
+```bash
+evs resolve HEAD
 ```
 
 ## TODO:
@@ -70,8 +76,8 @@ evs gc
 - [x] Maybe create and maintain db of store for more efficient garbage collection?
     > No, found better solution for the moment
 - [x] `evs gc`
-    > Needs good warning/user interaction
-- [ ] `evs lookup`
+- [x] `evs resolve`
+    > Probably needs to be changed? At least the Repository::resolve function?
 - [x] Maybe change serialization format to something more efficient?
     > msgpack instead of cbor
 - [ ] `evs clone`

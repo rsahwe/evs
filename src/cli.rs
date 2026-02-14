@@ -74,6 +74,10 @@ pub enum Commands {
     },
     /// Collects all unreferenced store objects and deletes them.
     Gc,
+    /// Prints the resolved store object of a given path
+    Resolve {
+        r#ref: String,
+    },
 }
 
 impl Cli {
@@ -203,6 +207,15 @@ impl Cli {
                 repo.gc(&self)?;
 
                 log!(&self, "Finished collecting garbage.");
+            }
+            Commands::Resolve { r#ref } => {
+                let repo = get_repo!();
+
+                let hash = repo.resolve(&r#ref, &self)?;
+
+                verbose!(&self, "\"{}\" resolved to \"{}\".", r#ref, hash);
+
+                none!("{}", hash);
             }
         }
 
