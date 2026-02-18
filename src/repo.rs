@@ -17,7 +17,7 @@ use crate::{
     objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
     trace,
-    util::DropAction,
+    util::{DropAction, confirmation},
     verbose,
 };
 
@@ -775,6 +775,10 @@ impl Repository {
 
         let mut deletion_list = vec![];
 
+        let mut tree_count = 0;
+        let mut commit_count = 0;
+        let mut blob_count = 0;
+
         while let Some((k, _)) = dependencies.iter().find(|(_, v)| **v == 0) {
             let k = *k;
 
@@ -787,7 +791,10 @@ impl Repository {
             verbose!(options, "Adding \"{}\" to the deletion list.", hash_display);
 
             match self.store.lookup(&hash_display, options)?.1 {
-                Object::Null | Object::Blob(_) => (),
+                Object::Null => (),
+                Object::Blob(_) => {
+                    blob_count += 1;
+                }
                 Object::Tree(items) => {
                     for item in items {
                         verbose!(
@@ -801,6 +808,8 @@ impl Repository {
                             dependencies.get(&item.content).unwrap_or(&1) - 1,
                         );
                     }
+
+                    tree_count += 1;
                 }
                 Object::Commit(commit) => {
                     verbose!(
@@ -824,16 +833,30 @@ impl Repository {
                         commit.parent,
                         dependencies.get(&commit.parent).unwrap_or(&1) - 1,
                     );
+
+                    commit_count += 1;
                 }
             }
         }
 
-        log!(options, "Deleting {} objects...", deletion_list.len());
+        if deletion_list.len() != 0 {
+            none!(
+                "This will delete {} objects: ({} commits, {} trees, {} blobs)",
+                deletion_list.len(),
+                commit_count,
+                tree_count,
+                blob_count
+            );
 
-        for item in deletion_list {
-            verbose!(options, "Deleting {}", HashDisplay(&item));
+            if confirmation("Are you sure?", false, options)? {
+                log!(options, "Deleting {} objects...", deletion_list.len());
 
-            self.store.remove(item, options)?;
+                for item in deletion_list {
+                    verbose!(options, "Deleting {}", HashDisplay(&item));
+
+                    self.store.remove(item, options)?;
+                }
+            }
         }
 
         let _ = ManuallyDrop::new(drop);

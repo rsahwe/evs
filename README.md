@@ -72,18 +72,15 @@ evs resolve HEAD
 - [x] `evs add`
 - [x] `evs sub`
 - [x] `evs commit`
+    > `--amend`
 - [x] `evs log`
-- [x] Maybe create and maintain db of store for more efficient garbage collection?
-    > No, found better solution for the moment
 - [x] `evs gc`
 - [x] `evs resolve`
-    > Probably needs to be changed? At least the Repository::resolve function?
-- [x] Maybe change serialization format to something more efficient?
-    > msgpack instead of cbor
 - [ ] `evs clone`
 - [ ] `evs checkout`
 - [ ] `evs status`
 - [ ] `evs diff`
+- [ ] Better logging (possibly tracing)
 - [ ] Remote tools for evs
 - [ ] Branch tools for evs
 - [ ] ...
