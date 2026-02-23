@@ -6,7 +6,14 @@ use std::{
 
 use clap::{ArgAction, Parser, Subcommand};
 
-use crate::{error::EvsError, log, none, repo::Repository, store::HashDisplay, verbose};
+use crate::{
+    diff::DiffSide,
+    error::EvsError,
+    log, none,
+    repo::Repository,
+    store::{Hash, HashDisplay},
+    verbose,
+};
 
 pub const VERBOSITY_NONE: u8 = 0;
 pub const VERBOSITY_LOG: u8 = 1;
@@ -77,6 +84,20 @@ pub enum Commands {
     /// Prints the resolved store object of a given path
     Resolve {
         r#ref: String,
+    },
+    Diff {
+        /// Switches to stage comparison. This compares the stage with the previous commit.
+        #[arg(long, group("from_group"), group("to_group"))]
+        staged: bool,
+        /// The base reference for the diff. Defaults to the stage.
+        #[arg(short, long, group("from_group"))]
+        from: Option<String>,
+        /// The compared reference for the diff. Defaults to the worktree.
+        #[arg(short, long, group("to_group"))]
+        to: Option<String>,
+        /// The paths to compare. Defaults to [ "." ].
+        #[arg(default_value = ".")]
+        paths: Vec<PathBuf>,
     },
 }
 
@@ -216,6 +237,49 @@ impl Cli {
                 verbose!(&self, "\"{}\" resolved to \"{}\".", r#ref, hash);
 
                 none!("{}", hash);
+            }
+            Commands::Diff {
+                staged,
+                from,
+                to,
+                paths,
+            } => {
+                let repo = get_repo!();
+
+                let (from, to) = if *staged {
+                    let to = DiffSide::Tree(repo.info.stage());
+
+                    let from = DiffSide::Tree(repo.get_tree(repo.info.head(), &self)?);
+
+                    (from, to)
+                } else {
+                    (
+                        DiffSide::Tree(
+                            from.as_ref()
+                                .map(|f| {
+                                    Ok::<Hash, EvsError>(
+                                        repo.get_tree(repo.lookup(f, &self)?.0, &self)?,
+                                    )
+                                })
+                                .transpose()?
+                                .unwrap_or(repo.info.stage()),
+                        ),
+                        to.as_ref()
+                            .map(|t| {
+                                Ok::<DiffSide, EvsError>(DiffSide::Tree(
+                                    repo.get_tree(repo.lookup(t, &self)?.0, &self)?,
+                                ))
+                            })
+                            .transpose()?
+                            .unwrap_or(DiffSide::Local(PathBuf::from("."))),
+                    )
+                };
+
+                verbose!(&self, "Diffing from {:?} to {:?}:", from, to);
+
+                DiffSide::diff_with(from, to, &repo.store, paths, &self)?;
+
+                log!(&self, "Finished diff.");
             }
         }
 

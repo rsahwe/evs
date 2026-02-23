@@ -372,7 +372,7 @@ impl Repository {
 
         let canon = path
             .as_ref()
-            .canonicalize()
+            .canonicalize() //TODO: ALTERNATIVE WITH PARTIAL CANONICALIZE (CUSTOM?)
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
         verbose!(options, "Canonicalized path to {:?}", canon);
@@ -864,6 +864,35 @@ impl Repository {
         trace!(options, "Repository::gc(self) done");
 
         Ok(())
+    }
+
+    pub fn get_tree(&self, commit: Hash, options: &Cli) -> Result<Hash, EvsError> {
+        trace!(
+            options,
+            "Repository::get_tree(self, \"{}\")",
+            HashDisplay(&commit)
+        );
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::get_tree(self, ...) error");
+        });
+
+        let (hash, commit) = self
+            .store
+            .lookup(&format!("{}", HashDisplay(&commit)), options)?;
+
+        verbose!(options, "Found referenced object.");
+
+        let commit = match commit {
+            Object::Commit(commit) => commit,
+            _ => return Err(EvsError::NotACommit(hash)),
+        };
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::get_tree(self, ...) done");
+
+        Ok(commit.tree)
     }
 }
 
