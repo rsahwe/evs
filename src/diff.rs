@@ -3,14 +3,15 @@ use std::{
     collections::{HashMap, HashSet},
     env::var_os,
     ffi::OsString,
+    fmt::Write as FmtWrite,
     fs,
-    io::{IsTerminal, stdout},
+    io::{BufRead, IsTerminal, Write as IoWrite, stdout},
     mem::ManuallyDrop,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
 };
 
-use similar::{DiffableStr, TextDiff};
+use similar::{DiffableStr, TextDiff, udiff::UnifiedDiff};
 
 use crate::{
     cli::Cli,
@@ -56,11 +57,11 @@ impl DiffSide {
 
         let lhs = from.read("", store, files, options)?;
 
-        verbose!(options, "Read 'from' diff source.");
+        verbose!(options, "Read 'from' diff source: {:?}.", lhs.0);
 
         let rhs = to.read("", store, files, options)?;
 
-        verbose!(options, "Read 'to' diff source.");
+        verbose!(options, "Read 'to' diff source: {:?}.", rhs.0);
 
         let removals = lhs.0.difference(&rhs.0);
         let insertions = rhs.0.difference(&lhs.0);
@@ -69,7 +70,12 @@ impl DiffSide {
         DiffFormat::print(
             removals.map(|e| (e.clone(), lhs.1.get(e).unwrap())),
             insertions.map(|e| (e.clone(), rhs.1.get(e).unwrap())),
-            modifications.map(|e| (e.clone(), lhs.1.get(e).unwrap(), rhs.1.get(e).unwrap())),
+            modifications.filter_map(|e| {
+                let lhs = lhs.1.get(e).unwrap();
+                let rhs = rhs.1.get(e).unwrap();
+
+                (rhs != lhs).then(|| (e.clone(), lhs, rhs))
+            }),
             options,
         );
 
@@ -123,7 +129,10 @@ impl DiffSide {
                 for entry in tree {
                     let path = origin.as_ref().join(OsString::from_vec(entry.name));
 
-                    if !filter.iter().any(|f| path.starts_with(f)) {
+                    if !filter
+                        .iter()
+                        .any(|f| path.starts_with(f) || f.starts_with(&path))
+                    {
                         verbose!(options, "Filtered path {:?}.", path);
 
                         continue;
@@ -195,7 +204,10 @@ impl DiffSide {
 
                     let path = origin.as_ref().join(&entry_name);
 
-                    if !filter.iter().any(|f| path.starts_with(f)) {
+                    if !filter
+                        .iter()
+                        .any(|f| path.starts_with(f) || f.starts_with(&path))
+                    {
                         verbose!(options, "Filtered path {:?}.", path);
 
                         continue;
@@ -254,9 +266,10 @@ impl DiffSide {
 
 pub struct DiffFormat;
 
-const INFO_COLOR: &str = "\033[36m";
-const ADD_COLOR: &str = "\033[32m";
-const SUB_COLOR: &str = "\033[31m";
+const INFO_COLOR: &str = "\x1b[36m";
+const ADD_COLOR: &str = "\x1b[32m";
+const SUB_COLOR: &str = "\x1b[31m";
+const NONE_COLOR: &str = "\x1b[0m";
 
 impl DiffFormat {
     pub fn print(
@@ -269,12 +282,13 @@ impl DiffFormat {
 
         let print_color = !(options.no_color
             || var_os("NO_COLOR").is_some_and(|v| v != "")
-            || !stdout().is_terminal());
+            || !stdout().is_terminal())
+            || options.force_color;
 
         for removal in removals {
             let text = match removal.1.as_ref().as_str() {
                 Some(text) => Cow::Borrowed(text),
-                None => todo!(),
+                None => Cow::Owned(DiffFormat::binary_to_text(removal.1.as_ref())),
             };
 
             let diff = TextDiff::from_lines(text.as_ref(), "");
@@ -290,13 +304,13 @@ impl DiffFormat {
                 "/dev/null",
             );
 
-            todo!()
+            DiffFormat::write_diff(diff, print_color);
         }
 
         for insertion in insertions {
             let text = match insertion.1.as_ref().as_str() {
                 Some(text) => Cow::Borrowed(text),
-                None => todo!(),
+                None => Cow::Owned(DiffFormat::binary_to_text(insertion.1.as_ref())),
             };
 
             let diff = TextDiff::from_lines("", text.as_ref());
@@ -312,18 +326,19 @@ impl DiffFormat {
                     .as_str(),
             );
 
-            todo!()
+            DiffFormat::write_diff(diff, print_color);
         }
 
         for modification in modifications {
-            let a_text = match modification.1.as_ref().as_str() {
-                Some(text) => Cow::Borrowed(text),
-                None => todo!(),
-            };
-
-            let b_text = match modification.1.as_ref().as_str() {
-                Some(text) => Cow::Borrowed(text),
-                None => todo!(),
+            let (a_text, b_text) = match (
+                modification.1.as_ref().as_str(),
+                modification.2.as_ref().as_str(),
+            ) {
+                (Some(a_text), Some(b_text)) => (Cow::Borrowed(a_text), Cow::Borrowed(b_text)),
+                (_, _) => (
+                    Cow::Owned(DiffFormat::binary_to_text(modification.1.as_ref())),
+                    Cow::Owned(DiffFormat::binary_to_text(modification.2.as_ref())),
+                ),
             };
 
             let diff = TextDiff::from_lines(a_text.as_ref(), b_text.as_ref());
@@ -343,9 +358,82 @@ impl DiffFormat {
                     .as_str(),
             );
 
-            todo!()
+            DiffFormat::write_diff(diff, print_color);
         }
 
-        todo!("")
+        trace!(options, "DiffFormat::print(...) done");
+    }
+
+    pub fn binary_to_text(binary: impl AsRef<[u8]>) -> String {
+        let mut result = String::new();
+
+        let _ = write!(
+            result,
+            "┌────────┬─────────────────────────┬─────────────────────────┐\n"
+        );
+
+        for (addr, line) in binary.as_ref().chunks(16).enumerate() {
+            let _ = write!(result, "│{:07x}0│", addr & u32::MAX as usize);
+
+            for left in line.iter().take(8) {
+                let _ = write!(result, " {:02x}", left);
+            }
+
+            if line.len() < 8 {
+                for _ in 0..(8 - line.len()) {
+                    let _ = write!(result, "   ");
+                }
+            }
+
+            let _ = write!(result, " ┊");
+
+            for right in line.iter().skip(8).take(8) {
+                let _ = write!(result, " {:02x}", right);
+            }
+
+            if line.len() < 16 {
+                for _ in 0..((16 - line.len()).min(8)) {
+                    let _ = write!(result, "   ");
+                }
+            }
+
+            let _ = write!(result, " │\n");
+        }
+
+        let _ = write!(
+            result,
+            "└────────┴─────────────────────────┴─────────────────────────┘\n"
+        );
+
+        result
+    }
+
+    pub fn write_diff<'a: 'b + 'c, 'b, 'c, 'd>(
+        diff: UnifiedDiff<'a, 'b, 'c, 'd, impl DiffableStr + ?Sized>,
+        print_color: bool,
+    ) {
+        let mut stdout = stdout();
+
+        if !print_color {
+            let _ = diff.to_writer(&stdout);
+        } else {
+            let mut result = Vec::new();
+
+            let _ = diff.to_writer(&mut result);
+
+            for line in result.as_slice().lines().flatten() {
+                if line.starts_with("+++") || line.starts_with("---") {
+                    ()
+                } else if line.starts_with('@') {
+                    let _ = write!(stdout, "{}", INFO_COLOR);
+                } else if line.starts_with('+') {
+                    let _ = write!(stdout, "{}", ADD_COLOR);
+                } else if line.starts_with('-') {
+                    let _ = write!(stdout, "{}", SUB_COLOR);
+                }
+
+                let _ = write!(stdout, "{}{}\n", line, NONE_COLOR);
+            }
+        }
     }
 }

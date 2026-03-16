@@ -79,7 +79,8 @@ evs resolve HEAD
 - [ ] `evs clone`
 - [ ] `evs checkout`
 - [ ] `evs status`
-- [ ] `evs diff`
+    > Show stage hash
+- [x] `evs diff`
 - [ ] Better logging (possibly tracing)
 - [ ] Remote tools for evs
 - [ ] Branch tools for evs

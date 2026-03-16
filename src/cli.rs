@@ -32,8 +32,12 @@ pub struct Cli {
     pub verbose: u8,
 
     /// Disables color printing which can also be done by setting the NO_COLOR variable to something.
-    #[arg(short, long, global(true))]
+    #[arg(long, global(true))]
     pub no_color: bool,
+
+    /// Forces color printing even if automatically or directly disabled.
+    #[arg(long, global(true))]
+    pub force_color: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -90,6 +94,7 @@ pub enum Commands {
     Resolve {
         r#ref: String,
     },
+    /// Prints the difference between two repository states in the unified diff format.
     Diff {
         /// Switches to stage comparison. This compares the stage with the previous commit.
         #[arg(long, group("from_group"), group("to_group"))]
