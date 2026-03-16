@@ -1,11 +1,10 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    env::var_os,
     ffi::OsString,
     fmt::Write as FmtWrite,
     fs,
-    io::{BufRead, IsTerminal, Write as IoWrite, stdout},
+    io::{BufRead, Write as IoWrite, stdout},
     mem::ManuallyDrop,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
@@ -19,7 +18,7 @@ use crate::{
     objects::Object,
     store::{Hash, HashDisplay, Store},
     trace,
-    util::DropAction,
+    util::{DropAction, get_color},
     verbose,
 };
 
@@ -280,10 +279,7 @@ impl DiffFormat {
     ) {
         trace!(options, "DiffFormat::print(...)");
 
-        let print_color = !(options.no_color
-            || var_os("NO_COLOR").is_some_and(|v| v != "")
-            || !stdout().is_terminal())
-            || options.force_color;
+        let print_color = get_color(options);
 
         for removal in removals {
             let text = match removal.1.as_ref().as_str() {

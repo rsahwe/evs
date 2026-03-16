@@ -1,5 +1,6 @@
 use std::{
-    io::{BufRead, Write, stdin, stdout},
+    env::var_os,
+    io::{BufRead, IsTerminal, Write, stdin, stdout},
     mem::ManuallyDrop,
 };
 
@@ -87,4 +88,9 @@ pub fn confirmation(prompt: &str, default: bool, options: &Cli) -> Result<bool, 
     trace!(options, "confirmation(...) done");
 
     Ok(response)
+}
+
+pub fn get_color(options: &Cli) -> bool {
+    !(options.no_color || var_os("NO_COLOR").is_some_and(|v| v != "") || !stdout().is_terminal())
+        || options.force_color
 }
