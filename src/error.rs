@@ -24,6 +24,7 @@ pub enum EvsError {
     PathOutsideOfRepo(PathBuf),
     IntegerParseError(ParseIntError),
     NotACommit(Hash),
+    NotATree(Hash),
     NoPreviousCommit,
 }
 
@@ -54,6 +55,9 @@ impl Display for EvsError {
             EvsError::IntegerParseError(err) => write!(f, "Could not parse integer: {}", err),
             EvsError::NotACommit(hash) => {
                 write!(f, "Object \"{}\" is not a commit", HashDisplay(hash))
+            }
+            EvsError::NotATree(hash) => {
+                write!(f, "Object \"{}\" is not a tree", HashDisplay(hash))
             }
             EvsError::NoPreviousCommit => write!(f, "NULL object does not have a previous commit"),
         }
@@ -93,6 +97,7 @@ pub enum CorruptState {
     InvalidCompression(PathBuf, io::Error),
     MissingObjects(Hash, usize),
     InvalidObjectContent(Hash, rmp_serde::decode::Error),
+    NonContentInTree(Hash, Hash, &'static str),
 }
 
 impl Display for CorruptState {
@@ -123,6 +128,15 @@ impl Display for CorruptState {
             }
             CorruptState::InvalidObjectContent(hash, err) => {
                 write!(f, "Object \"{}\" is not valid: {}", HashDisplay(hash), err)
+            }
+            CorruptState::NonContentInTree(tree, content, r#type) => {
+                write!(
+                    f,
+                    "Object \"{}\" in tree \"{}\" is {} insted of a tree entry type",
+                    HashDisplay(tree),
+                    HashDisplay(content),
+                    r#type
+                )
             }
         }
     }

@@ -201,12 +201,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "enable-ansi-support"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea7457668b3da8a4b702f3d79e131aa3e81cd7e81cc95fb2d54fce9f182ecc77"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
 name = "evs"
 version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
+ "enable-ansi-support",
  "flate2",
  "rmp-serde",
  "serde",

@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::{ArgAction, Parser, Subcommand};
+use enable_ansi_support::enable_ansi_support;
 
 use crate::{
     diff::DiffSide,
@@ -29,6 +30,10 @@ pub struct Cli {
     /// Increases the verbosity level by one each time it appears.
     #[arg(short, action(ArgAction::Count), global(true))]
     pub verbose: u8,
+
+    /// Disables color printing which can also be done by setting the NO_COLOR variable to something.
+    #[arg(short, long, global(true))]
+    pub no_color: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -102,7 +107,11 @@ pub enum Commands {
 }
 
 impl Cli {
-    pub fn run(self) -> Result<(), EvsError> {
+    pub fn run(mut self) -> Result<(), EvsError> {
+        if enable_ansi_support().is_err() {
+            self.no_color = true;
+        }
+
         macro_rules! get_repo {
             () => {{
                 log!(
@@ -271,13 +280,28 @@ impl Cli {
                                 ))
                             })
                             .transpose()?
-                            .unwrap_or(DiffSide::Local(PathBuf::from("."))),
+                            .unwrap_or(DiffSide::Local(repo.workspace.clone(), true)),
                     )
                 };
 
                 verbose!(&self, "Diffing from {:?} to {:?}:", from, to);
 
-                DiffSide::diff_with(from, to, &repo.store, paths, &self)?;
+                DiffSide::diff_with(
+                    from,
+                    to,
+                    &repo.store,
+                    paths
+                        .iter()
+                        .map(|p| {
+                            p.canonicalize()
+                                .map_err(|e| (e, p.clone()))?
+                                .strip_prefix(&repo.workspace)
+                                .map(|p| p.to_path_buf())
+                                .map_err(|_| EvsError::PathOutsideOfRepo(p.clone()))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    &self,
+                )?;
 
                 log!(&self, "Finished diff.");
             }

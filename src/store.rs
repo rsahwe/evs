@@ -46,6 +46,10 @@ impl Store {
         Self { path }
     }
 
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     /// Assumes a valid store and might cause unintended behaviour
     pub fn insert(&self, mut obj: Object, options: &Cli) -> Result<Hash, EvsError> {
         trace!(options, "Store::insert(self, ...)");
