@@ -99,7 +99,7 @@ evs status
 - [x] `evs diff`
 - [x] `.evsignore`
 - [x] `evs status`
-- [ ] Better object printing
+- [x] Better object printing
 - [ ] Globbing in `.evsignore`
 - [ ] `evs clone`
 - [ ] `evs checkout`

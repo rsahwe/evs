@@ -55,7 +55,7 @@ impl Display for Object {
             }
             Object::Commit(commit) => write!(
                 f,
-                "Commit by {} <{}> at {}\n- \"{}\" state\n- \"{}\" parent\n{}",
+                "  Commit by {} <{}> at {}\n  - \"{}\" state\n  - \"{}\" parent\n\n{}",
                 commit.name,
                 commit.email,
                 OffsetDateTime::from(commit.date)
@@ -63,7 +63,12 @@ impl Display for Object {
                     .expect("I think this can't fail"),
                 HashDisplay(&commit.tree),
                 HashDisplay(&commit.parent),
-                commit.msg
+                commit.msg.lines().fold(String::new(), |mut acc, l| {
+                    acc += "    ";
+                    acc += l;
+                    acc += "\n";
+                    acc
+                }),
             ),
         }
     }

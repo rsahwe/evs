@@ -19,8 +19,8 @@ use crate::{
     store::{Hash, HashDisplay, Store},
     trace,
     util::{
-        ADD_COLOR, DropAction, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, confirmation,
-        get_color,
+        ADD_COLOR, DropAction, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay,
+        confirmation, get_color,
     },
     verbose,
 };
@@ -721,24 +721,40 @@ impl Repository {
             trace!(options, "Repository::log(self, ...) error");
         });
 
+        let print_color = get_color(options);
+
         let mut resolved = self.resolve(r#ref, options)?;
 
         verbose!(options, "Resolved to \"{}\".", resolved);
 
-        for _ in 0..limit {
-            let (hash, commit) = self.store.lookup(&resolved, options)?;
+        'broken: {
+            for _ in 0..limit {
+                let (hash, commit) = self.store.lookup(&resolved, options)?;
 
-            match commit {
-                Object::Null => break,
-                Object::Commit(Commit { parent, .. }) => {
-                    println!("{}:\n{}", HashDisplay(&hash), commit);
+                match commit {
+                    Object::Null => break 'broken,
+                    Object::Commit(Commit { parent, .. }) => {
+                        println!(
+                            "{}{}{}:\n{}",
+                            if print_color { INFO_COLOR } else { "" },
+                            HashDisplay(&hash),
+                            if print_color { NONE_COLOR } else { "" },
+                            commit
+                        );
 
-                    resolved = format!("{}", HashDisplay(&parent));
+                        resolved = format!("{}", HashDisplay(&parent));
+                    }
+                    _ => return Err(EvsError::NotACommit(hash)),
                 }
-                _ => return Err(EvsError::NotACommit(hash)),
+
+                verbose!(options, "Continuing with \"{}\"", resolved);
             }
 
-            verbose!(options, "Continuing with \"{}\"", resolved);
+            println!(
+                "{}...{}",
+                if print_color { INFO_COLOR } else { "" },
+                if print_color { NONE_COLOR } else { "" }
+            )
         }
 
         let _ = ManuallyDrop::new(drop);
