@@ -85,6 +85,9 @@ pub enum Commands {
         /// The maximum number of commits to log.
         #[arg(short, long, default_value_t = 5)]
         limit: usize,
+        /// Prints every commit on only one line.
+        #[arg(short, long)]
+        oneline: bool,
         /// The commit to start the log from.
         #[arg(default_value = "HEAD")]
         r#ref: String,
@@ -244,10 +247,14 @@ impl Cli {
 
                 none!("HEAD is now at \"{}\".", HashDisplay(&commit));
             }
-            Commands::Log { r#ref, limit } => {
+            Commands::Log {
+                r#ref,
+                limit,
+                oneline,
+            } => {
                 let repo = get_repo!();
 
-                repo.log(r#ref, *limit, &self)?;
+                repo.log(r#ref, *limit, *oneline, &self)?;
 
                 log!(&self, "Finished printing log.");
             }

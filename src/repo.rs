@@ -714,7 +714,13 @@ impl Repository {
         Ok(result)
     }
 
-    pub fn log(&self, r#ref: impl AsRef<str>, limit: usize, options: &Cli) -> Result<(), EvsError> {
+    pub fn log(
+        &self,
+        r#ref: impl AsRef<str>,
+        limit: usize,
+        oneline: bool,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         trace!(options, "Repository::log(self, \"{}\")", r#ref.as_ref());
 
         let drop = DropAction(|| {
@@ -722,6 +728,10 @@ impl Repository {
         });
 
         let print_color = get_color(options);
+
+        let mod_color = if print_color { MOD_COLOR } else { "" };
+        let info_color = if print_color { INFO_COLOR } else { "" };
+        let none_color = if print_color { NONE_COLOR } else { "" };
 
         let mut resolved = self.resolve(r#ref, options)?;
 
@@ -733,14 +743,30 @@ impl Repository {
 
                 match commit {
                     Object::Null => break 'broken,
-                    Object::Commit(Commit { parent, .. }) => {
-                        println!(
-                            "{}{}{}:\n{}",
-                            if print_color { INFO_COLOR } else { "" },
-                            HashDisplay(&hash),
-                            if print_color { NONE_COLOR } else { "" },
-                            commit
-                        );
+                    Object::Commit(Commit {
+                        parent, ref msg, ..
+                    }) => {
+                        if oneline {
+                            println!(
+                                "{}{}{}: {}{}{}",
+                                info_color,
+                                HashDisplay(&hash),
+                                none_color,
+                                mod_color,
+                                msg.lines().next().unwrap_or(""),
+                                none_color
+                            );
+                        } else {
+                            println!(
+                                "{}{}{}:\n{}{}{}",
+                                info_color,
+                                HashDisplay(&hash),
+                                none_color,
+                                mod_color,
+                                commit,
+                                none_color
+                            );
+                        }
 
                         resolved = format!("{}", HashDisplay(&parent));
                     }
@@ -750,11 +776,7 @@ impl Repository {
                 verbose!(options, "Continuing with \"{}\"", resolved);
             }
 
-            println!(
-                "{}...{}",
-                if print_color { INFO_COLOR } else { "" },
-                if print_color { NONE_COLOR } else { "" }
-            )
+            println!("{}...{}", info_color, none_color);
         }
 
         let _ = ManuallyDrop::new(drop);
