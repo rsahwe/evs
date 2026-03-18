@@ -22,6 +22,7 @@ pub enum EvsError {
     AmbiguousObject(String, OsString),
     RepositoryInfoCorrupt(rmp_serde::decode::Error),
     PathOutsideOfRepo(PathBuf),
+    PathNotInStage(PathBuf),
     IntegerParseError(ParseIntError),
     NotACommit(Hash),
     NotATree(Hash),
@@ -52,6 +53,7 @@ impl Display for EvsError {
             EvsError::PathOutsideOfRepo(err) => {
                 write!(f, "Path {:?} is outside of the repository.", err)
             }
+            EvsError::PathNotInStage(err) => write!(f, "Path {:?} is not in the stage.", err),
             EvsError::IntegerParseError(err) => write!(f, "Could not parse integer: {}", err),
             EvsError::NotACommit(hash) => {
                 write!(f, "Object \"{}\" is not a commit", HashDisplay(hash))

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io::{Write, stdout},
     path::{Path, PathBuf},
     time::SystemTime,
@@ -179,8 +180,19 @@ impl Cli {
 
                 verbose!(&self, "Adding {} paths:", paths.len());
 
+                let (set, map) = DiffSide::Tree(repo.info.stage()).read(
+                    "",
+                    &repo.store,
+                    &[AsRef::<Path>::as_ref("").to_path_buf()],
+                    &[],
+                    &HashSet::new(),
+                    &self,
+                )?;
+
+                drop(map);
+
                 for file in paths {
-                    repo.add(file, &self)?;
+                    repo.add(file, &set, &self)?;
 
                     log!(&self, "Added {:?}", file);
                 }

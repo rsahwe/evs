@@ -57,11 +57,11 @@ impl DiffSide {
             trace!(options, "Diffside::diff_with(...) error");
         });
 
-        let lhs = from.read("", store, files, ignores, options)?;
+        let lhs = from.read("", store, files, ignores, &HashSet::new(), options)?;
 
         verbose!(options, "Read 'from' diff source: {:?}.", lhs.0);
 
-        let rhs = to.read("", store, files, ignores, options)?;
+        let rhs = to.read("", store, files, ignores, &lhs.0, options)?;
 
         verbose!(options, "Read 'to' diff source: {:?}.", rhs.0);
 
@@ -94,6 +94,7 @@ impl DiffSide {
         store: &Store,
         filter: impl AsRef<[PathBuf]>,
         ignores: impl AsRef<[PathBuf]>,
+        overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
         trace!(
@@ -165,7 +166,7 @@ impl DiffSide {
                             verbose!(options, "Reading tree...");
 
                             let (set, map) = DiffSide::Tree(entry_hash)
-                                .read(path, store, filter, ignores, options)?;
+                                .read(path, store, filter, ignores, overrides, options)?;
 
                             for el in set {
                                 sum_set.insert(el);
@@ -207,7 +208,8 @@ impl DiffSide {
                     if !filter
                         .iter()
                         .any(|f| path.starts_with(f) || f.starts_with(&path))
-                        || ignores.iter().any(|i| path == *i)
+                        || (!overrides.iter().any(|o| o.starts_with(&path))
+                            && ignores.iter().any(|i| path.starts_with(i)))
                     {
                         verbose!(options, "Filtered path {:?}.", path);
 
@@ -224,8 +226,8 @@ impl DiffSide {
                     } else if entry.is_dir() {
                         verbose!(options, "Reading tree...");
 
-                        let (set, map) =
-                            DiffSide::Local(entry).read(path, store, filter, ignores, options)?;
+                        let (set, map) = DiffSide::Local(entry)
+                            .read(path, store, filter, ignores, overrides, options)?;
 
                         for el in set {
                             sum_set.insert(el);

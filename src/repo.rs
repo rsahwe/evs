@@ -277,7 +277,12 @@ impl Repository {
         Ok(())
     }
 
-    pub fn add(&mut self, path: impl AsRef<Path>, options: &Cli) -> Result<(), EvsError> {
+    pub fn add(
+        &mut self,
+        path: impl AsRef<Path>,
+        overrides: &HashSet<PathBuf>,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         trace!(options, "Repository::add(self, {:?})", path.as_ref());
 
         let drop = DropAction(|| {
@@ -301,7 +306,7 @@ impl Repository {
 
         verbose!(options, "Using ignores: {:?}.", ignores);
 
-        if ignores.iter().any(|i| relative.starts_with(i)) {
+        if ignores.iter().any(|i| relative.starts_with(i)) && !overrides.contains(relative) {
             if relative.starts_with(".evs")
                 || !confirmation(
                     &format!("{:?} is ignored, add anyway?", relative),
@@ -320,7 +325,7 @@ impl Repository {
         }
 
         let hash = if canon.is_dir() {
-            let hash = self.hash_dir(&canon, ignores, options)?;
+            let hash = self.hash_dir(&canon, ignores, overrides, options)?;
 
             if relative == "" {
                 verbose!(options, "Hashed contents of path.");
@@ -352,6 +357,7 @@ impl Repository {
 
         let new_stage = match self.update_stage(
             relative.components().peekable(),
+            relative,
             Some(hash),
             self.info.stage(),
             options,
@@ -410,6 +416,7 @@ impl Repository {
         } else {
             match self.update_stage(
                 relative.components().peekable(),
+                relative,
                 None,
                 self.info.stage(),
                 options,
@@ -436,12 +443,15 @@ impl Repository {
 
     fn update_stage(
         &mut self,
-        mut path: Peekable<Components>,
+        mut components: Peekable<Components>,
+        path: impl AsRef<Path>,
         obj: Option<Hash>,
         tree: Hash,
         options: &Cli,
     ) -> Result<Option<Hash>, EvsError> {
-        let next = path.next().unwrap();
+        let next = components.next().unwrap();
+
+        let path = path.as_ref();
 
         trace!(
             options,
@@ -476,21 +486,21 @@ impl Repository {
 
         verbose!(options, "Obtained {} tree item(s).", items.len());
 
-        let hash = if path.peek().is_none() {
+        let hash = if components.peek().is_none() {
             obj
         } else {
             let next = match items.iter().find(|e| e.name == next_bytes) {
                 Some(next) => next.content,
                 None => {
                     if obj.is_none() {
-                        todo!("Same error as later")
+                        return Err(EvsError::PathNotInStage(path.to_path_buf()));
                     } else {
                         self.store.insert(Object::Tree(vec![]), options)?
                     }
                 }
             };
 
-            self.update_stage(path, obj, next, options)?
+            self.update_stage(components, path, obj, next, options)?
         };
 
         verbose!(
@@ -545,7 +555,7 @@ impl Repository {
                     Some(self.store.insert(Object::Tree(items), options)?)
                 }
             } else {
-                todo!("Error for this")
+                return Err(EvsError::PathNotInStage(path.to_path_buf()));
             }
         };
 
@@ -562,6 +572,7 @@ impl Repository {
         &self,
         path: &PathBuf,
         ignores: impl AsRef<[PathBuf]>,
+        overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<Hash, EvsError> {
         trace!(
@@ -570,6 +581,8 @@ impl Repository {
             path,
             ignores.as_ref()
         );
+
+        verbose!(options, "CHANGE");
 
         let drop = DropAction(|| {
             trace!(options, "Repository::hash_dir(self, ...) error");
@@ -597,13 +610,15 @@ impl Repository {
 
                 let relative = next.strip_prefix(&self.workspace).unwrap();
 
-                if ignores.iter().any(|i| i == relative) {
+                if ignores.iter().any(|i| i == relative)
+                    && !overrides.iter().any(|o| o.starts_with(relative))
+                {
                     verbose!(options, "Filtered child {:?}.", name);
 
                     continue;
                 }
 
-                let hash = self.hash_dir(&next, ignores, options)?;
+                let hash = self.hash_dir(&next, ignores, overrides, options)?;
 
                 verbose!(options, "Hashed child {:?}.", name);
 
