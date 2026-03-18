@@ -64,11 +64,25 @@ evs gc
 evs resolve HEAD
 ```
 
-//TODO: DIFF DOCS
+### To show the difference between two commits in the current directory:
 
-//TODO: .evsignore DOCS
+```bash
+evs diff -f ABC... -t DEF...
+```
 
-//TODO: STATUS DOCS
+### To show the difference between the last commit and the stage of certain files:
+
+```bash
+evs diff --staged first_file.txt second_file.rs
+```
+
+### Use the `.evsignore` file to list files to ignore.
+
+### To show the current repository status:
+
+```bash
+evs status
+```
 
 ## TODO:
 
@@ -85,6 +99,7 @@ evs resolve HEAD
 - [x] `evs diff`
 - [x] `.evsignore`
 - [x] `evs status`
+- [ ] Better object printing
 - [ ] Globbing in `.evsignore`
 - [ ] `evs clone`
 - [ ] `evs checkout`
