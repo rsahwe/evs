@@ -68,6 +68,8 @@ evs resolve HEAD
 
 //TODO: .evsignore DOCS
 
+//TODO: STATUS DOCS
+
 ## TODO:
 
 - [x] `evs init`
@@ -82,8 +84,7 @@ evs resolve HEAD
 - [x] `evs resolve`
 - [x] `evs diff`
 - [x] `.evsignore`
-- [ ] `evs status`
-    > Show stage hash
+- [x] `evs status`
 - [ ] Globbing in `.evsignore`
 - [ ] `evs clone`
 - [ ] `evs checkout`

@@ -467,4 +467,18 @@ impl Store {
 
         Ok(resolved)
     }
+
+    pub fn status(&self) -> Result<(usize, usize), EvsError> {
+        self.path
+            .read_dir()
+            .map_err(|e| (e, self.path.clone()))?
+            .fold(Ok((0, 0)), |acc, entry| match (acc, entry) {
+                (Ok((count, size)), Ok(entry)) => Ok((
+                    count + 1,
+                    size + entry.metadata().map_err(|e| (e, entry.path()))?.len() as usize,
+                )),
+                (Err(err), _) => Err(err),
+                (_, Err(err)) => Err((err, self.path.clone()).into()),
+            })
+    }
 }

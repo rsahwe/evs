@@ -18,7 +18,7 @@ use crate::{
     objects::Object,
     store::{Hash, HashDisplay, Store},
     trace,
-    util::{DropAction, get_color},
+    util::{ADD_COLOR, DropAction, INFO_COLOR, NONE_COLOR, SUB_COLOR, get_color},
     verbose,
 };
 
@@ -262,11 +262,6 @@ impl DiffSide {
 }
 
 pub struct DiffFormat;
-
-const INFO_COLOR: &str = "\x1b[36m";
-const ADD_COLOR: &str = "\x1b[32m";
-const SUB_COLOR: &str = "\x1b[31m";
-const NONE_COLOR: &str = "\x1b[0m";
 
 impl DiffFormat {
     pub fn print(

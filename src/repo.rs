@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, DirBuilder, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write, stdout},
     iter::{Peekable, once},
     mem::ManuallyDrop,
     path::{Components, Path, PathBuf},
@@ -12,12 +12,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::Cli,
+    diff::DiffSide,
     error::{CorruptState, EvsError},
     log, none,
     objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
     trace,
-    util::{DropAction, confirmation},
+    util::{
+        ADD_COLOR, DropAction, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, confirmation,
+        get_color,
+    },
     verbose,
 };
 
@@ -889,7 +893,7 @@ impl Repository {
                 blob_count
             );
 
-            if confirmation("Are you sure?", false, options)? {
+            if confirmation("Are you sure?", true, options)? {
                 log!(options, "Deleting {} objects...", deletion_list.len());
 
                 for item in deletion_list {
@@ -970,6 +974,173 @@ impl Repository {
         trace!(options, "Repository::get_ignores(self) ok");
 
         Ok(result)
+    }
+
+    pub fn status(&self, options: &Cli) -> Result<(), EvsError> {
+        trace!(options, "Repository::status(self)");
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::status(self) error");
+        });
+
+        let (store_count, store_size) = self.store.status()?;
+
+        verbose!(
+            options,
+            "Store reported {} objects with a collective {} bytes.",
+            store_count,
+            store_size
+        );
+
+        let (repo_head, repo_stage) = (self.info.head(), self.info.stage());
+
+        let commit_diffside = DiffSide::Tree(self.get_tree(repo_head, options)?);
+
+        let stage_diffside = DiffSide::Tree(repo_stage);
+
+        let local_diffside = DiffSide::Local(self.workspace.clone());
+
+        verbose!(options, "Prepared diffsides.");
+
+        let ignores = self.get_ignores(options)?;
+
+        let global_filter = [AsRef::<Path>::as_ref("").to_path_buf()];
+
+        let empty_set = HashSet::new();
+
+        let cds = commit_diffside.read(
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+            options,
+        )?;
+
+        let sds = stage_diffside.read(
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+            options,
+        )?;
+
+        let lds =
+            local_diffside.read("", &self.store, &global_filter, &ignores, &sds.0, options)?;
+
+        verbose!(
+            options,
+            "Read diffsides: {:?} -> {:?} -> {:?}.",
+            cds.0,
+            sds.0,
+            lds.0
+        );
+
+        let (stage_added, stage_modified, stage_removed) = (
+            sds.0.difference(&cds.0).collect(),
+            sds.0
+                .intersection(&cds.0)
+                .filter(|k| cds.1.get(*k).unwrap() != sds.1.get(*k).unwrap())
+                .collect(),
+            cds.0.difference(&sds.0).collect(),
+        );
+
+        verbose!(options, "Generated stage diff.");
+
+        let (local_added, local_modified, local_removed) = (
+            lds.0.difference(&sds.0).collect(),
+            lds.0
+                .intersection(&sds.0)
+                .filter(|k| sds.1.get(*k).unwrap() != lds.1.get(*k).unwrap())
+                .collect(),
+            sds.0.difference(&lds.0).collect(),
+        );
+
+        verbose!(options, "Generated local diff.");
+
+        self.print_info(
+            store_count,
+            store_size,
+            repo_head,
+            repo_stage,
+            stage_added,
+            stage_modified,
+            stage_removed,
+            local_added,
+            local_modified,
+            local_removed,
+            get_color(options),
+        );
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::status(self) ok");
+
+        Ok(())
+    }
+
+    pub fn print_info(
+        &self,
+        store_count: usize,
+        store_size: usize,
+        repo_head: Hash,
+        repo_stage: Hash,
+        stage_added: Vec<&PathBuf>,
+        stage_modified: Vec<&PathBuf>,
+        stage_removed: Vec<&PathBuf>,
+        local_added: Vec<&PathBuf>,
+        local_modified: Vec<&PathBuf>,
+        local_removed: Vec<&PathBuf>,
+        print_color: bool,
+    ) {
+        let add_color = if print_color { ADD_COLOR } else { "" };
+        let sub_color = if print_color { SUB_COLOR } else { "" };
+        let mod_color = if print_color { MOD_COLOR } else { "" };
+        let none_color = if print_color { NONE_COLOR } else { "" };
+
+        println!("  Head is at \"{}\"", HashDisplay(&repo_head));
+        println!("  and stage is \"{}\"", HashDisplay(&repo_stage));
+        println!(
+            "  Store has {} objects with size {}",
+            store_count,
+            SizeDisplay(store_size, print_color)
+        );
+        if stage_added.len() + stage_modified.len() + stage_removed.len() > 0 {
+            println!();
+            println!("  Staged changes:");
+            print!("{}", add_color);
+            for addition in stage_added {
+                println!("    added {:?}", addition);
+            }
+            print!("{}", mod_color);
+            for modification in stage_modified {
+                println!("    modified {:?}", modification);
+            }
+            print!("{}", sub_color);
+            for deletion in stage_removed {
+                println!("    removed {:?}", deletion);
+            }
+        }
+        if local_added.len() + local_modified.len() + local_removed.len() > 0 {
+            println!("{}", none_color);
+            println!("  Unstaged changes:");
+            print!("{}", add_color);
+            for addition in local_added {
+                println!("    added {:?}", addition);
+            }
+            print!("{}", mod_color);
+            for modification in local_modified {
+                println!("    modified {:?}", modification);
+            }
+            print!("{}", sub_color);
+            for deletion in local_removed {
+                println!("    removed {:?}", deletion);
+            }
+        }
+        print!("{}", none_color);
+
+        let _ = stdout().flush();
     }
 }
 

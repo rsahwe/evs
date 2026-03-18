@@ -111,6 +111,8 @@ pub enum Commands {
         #[arg(default_value = ".")]
         paths: Vec<PathBuf>,
     },
+    /// Prints the repository status including commit status, changes, staged changes and object count.
+    Status,
 }
 
 impl Cli {
@@ -323,6 +325,13 @@ impl Cli {
                 )?;
 
                 log!(&self, "Finished diff.");
+            }
+            Commands::Status => {
+                let repo = get_repo!();
+
+                repo.status(&self)?;
+
+                log!(&self, "Finished reporting status.");
             }
         }
 
