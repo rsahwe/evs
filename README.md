@@ -64,6 +64,10 @@ evs gc
 evs resolve HEAD
 ```
 
+//TODO: DIFF DOCS
+
+//TODO: .evsignore DOCS
+
 ## TODO:
 
 - [x] `evs init`
@@ -76,12 +80,15 @@ evs resolve HEAD
 - [x] `evs log`
 - [x] `evs gc`
 - [x] `evs resolve`
-- [ ] `evs clone`
-- [ ] `evs checkout`
+- [x] `evs diff`
+- [x] `.evsignore`
 - [ ] `evs status`
     > Show stage hash
-- [x] `evs diff`
+- [ ] Globbing in `.evsignore`
+- [ ] `evs clone`
+- [ ] `evs checkout`
 - [ ] Better logging (possibly tracing)
 - [ ] Remote tools for evs
 - [ ] Branch tools for evs
+- [ ] Merge tools for evs
 - [ ] ...

@@ -106,6 +106,7 @@ pub enum Commands {
         #[arg(short, long, group("to_group"))]
         to: Option<String>,
         /// The paths to compare. Defaults to [ "." ].
+        // TODO: FIX?
         #[arg(default_value = ".")]
         paths: Vec<PathBuf>,
     },
@@ -285,7 +286,7 @@ impl Cli {
                                 ))
                             })
                             .transpose()?
-                            .unwrap_or(DiffSide::Local(repo.workspace.clone(), true)),
+                            .unwrap_or(DiffSide::Local(repo.workspace.clone())),
                     )
                 };
 
@@ -305,6 +306,7 @@ impl Cli {
                                 .map_err(|_| EvsError::PathOutsideOfRepo(p.clone()))
                         })
                         .collect::<Result<Vec<_>, _>>()?,
+                    repo.get_ignores(&self)?,
                     &self,
                 )?;
 

@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    iter::Peekable,
+    iter::{Peekable, once},
     mem::ManuallyDrop,
     path::{Components, Path, PathBuf},
     time::SystemTime,
@@ -291,24 +291,36 @@ impl Repository {
 
         verbose!(options, "Canonicalized path to {:?}", canon);
 
-        if !canon.starts_with(
-            self.repository
-                .parent()
-                .expect("repository should have parent"),
-        ) {
+        if !canon.starts_with(&self.workspace) {
             return Err(EvsError::PathOutsideOfRepo(canon));
         }
 
-        if canon.starts_with(&self.repository) {
-            return Err(EvsError::PathOutsideOfRepo(canon));
-        }
+        let relative = canon.strip_prefix(&self.workspace).unwrap();
 
-        let relative = canon
-            .strip_prefix(self.repository.parent().unwrap())
-            .unwrap();
+        let ignores = self.get_ignores(options)?;
+
+        verbose!(options, "Using ignores: {:?}.", ignores);
+
+        if ignores.iter().any(|i| relative.starts_with(i)) {
+            if relative.starts_with(".evs")
+                || !confirmation(
+                    &format!("{:?} is ignored, add anyway?", relative),
+                    false,
+                    options,
+                )?
+            {
+                verbose!(options, "Filtered path {:?}.", relative);
+
+                let _ = ManuallyDrop::new(drop);
+
+                trace!(options, "Repository::add(self, ...) done");
+
+                return Ok(());
+            }
+        }
 
         let hash = if canon.is_dir() {
-            let hash = self.hash_dir(&canon, options)?;
+            let hash = self.hash_dir(&canon, ignores, options)?;
 
             if relative == "" {
                 verbose!(options, "Hashed contents of path.");
@@ -546,12 +558,24 @@ impl Repository {
         Ok(hash)
     }
 
-    fn hash_dir(&self, path: &PathBuf, options: &Cli) -> Result<Hash, EvsError> {
-        trace!(options, "Repository::hash_dir(self, {:?})", path);
+    fn hash_dir(
+        &self,
+        path: &PathBuf,
+        ignores: impl AsRef<[PathBuf]>,
+        options: &Cli,
+    ) -> Result<Hash, EvsError> {
+        trace!(
+            options,
+            "Repository::hash_dir(self, {:?}, {:?})",
+            path,
+            ignores.as_ref()
+        );
 
         let drop = DropAction(|| {
             trace!(options, "Repository::hash_dir(self, ...) error");
         });
+
+        let ignores = ignores.as_ref();
 
         let res = if !path.is_dir() {
             let content = fs::read(path).map_err(|e| (e, path.to_owned()))?;
@@ -571,13 +595,15 @@ impl Repository {
 
                 let next = path.join(&name);
 
-                if next.starts_with(&self.repository) {
-                    verbose!(options, "Skipping repository...");
+                let relative = next.strip_prefix(&self.workspace).unwrap();
+
+                if ignores.iter().any(|i| i == relative) {
+                    verbose!(options, "Filtered child {:?}.", name);
 
                     continue;
                 }
 
-                let hash = self.hash_dir(&next, options)?;
+                let hash = self.hash_dir(&next, ignores, options)?;
 
                 verbose!(options, "Hashed child {:?}.", name);
 
@@ -893,6 +919,42 @@ impl Repository {
         trace!(options, "Repository::get_tree(self, ...) done");
 
         Ok(commit.tree)
+    }
+
+    pub fn get_ignores(&self, options: &Cli) -> Result<Vec<PathBuf>, EvsError> {
+        trace!(options, "Repository::get_ignores(self)");
+
+        let drop = DropAction(|| {
+            trace!(options, "Repository::get_ignores(self) error");
+        });
+
+        let ignores_file = self.workspace.join(".evsignore");
+
+        let content = if ignores_file.exists() {
+            verbose!(options, "Ignores file exists, trying to read...");
+
+            fs::read_to_string(&ignores_file).map_err(|e| (e, ignores_file))?
+        } else {
+            verbose!(options, "Missing ignores file substituted with \"\".");
+
+            String::new()
+        };
+
+        verbose!(options, "Read ignores file successfully.");
+
+        let result = content
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.len() != 0)
+            .chain(once(".evs"))
+            .map(PathBuf::from)
+            .collect();
+
+        let _ = ManuallyDrop::new(drop);
+
+        trace!(options, "Repository::get_ignores(self) ok");
+
+        Ok(result)
     }
 }
 

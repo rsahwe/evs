@@ -25,7 +25,7 @@ use crate::{
 #[derive(Debug, PartialEq, Eq)]
 pub enum DiffSide {
     Tree(Hash),
-    Local(PathBuf, bool),
+    Local(PathBuf),
 }
 
 impl DiffSide {
@@ -34,14 +34,16 @@ impl DiffSide {
         to: Self,
         store: &Store,
         files: impl AsRef<[PathBuf]>,
+        ignores: impl AsRef<[PathBuf]>,
         options: &Cli,
     ) -> Result<(), EvsError> {
         trace!(
             options,
-            "Diffside::diff_with({:?}, {:?}, store, {:?})",
+            "Diffside::diff_with({:?}, {:?}, store, {:?}, {:?})",
             from,
             to,
-            files.as_ref()
+            files.as_ref(),
+            ignores.as_ref()
         );
 
         if from == to {
@@ -49,16 +51,17 @@ impl DiffSide {
         }
 
         let files = files.as_ref();
+        let ignores = ignores.as_ref();
 
         let drop = DropAction(|| {
             trace!(options, "Diffside::diff_with(...) error");
         });
 
-        let lhs = from.read("", store, files, options)?;
+        let lhs = from.read("", store, files, ignores, options)?;
 
         verbose!(options, "Read 'from' diff source: {:?}.", lhs.0);
 
-        let rhs = to.read("", store, files, options)?;
+        let rhs = to.read("", store, files, ignores, options)?;
 
         verbose!(options, "Read 'to' diff source: {:?}.", rhs.0);
 
@@ -90,13 +93,15 @@ impl DiffSide {
         origin: impl AsRef<Path>,
         store: &Store,
         filter: impl AsRef<[PathBuf]>,
+        ignores: impl AsRef<[PathBuf]>,
         options: &Cli,
     ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
         trace!(
             options,
-            "Diffside::read(self, {:?}, store, {:?})",
+            "Diffside::read(self, {:?}, store, {:?}, {:?})",
             origin.as_ref(),
-            filter.as_ref()
+            filter.as_ref(),
+            ignores.as_ref()
         );
 
         let drop = DropAction(|| {
@@ -107,6 +112,7 @@ impl DiffSide {
         let mut sum_map = HashMap::new();
 
         let filter = filter.as_ref();
+        let ignores = ignores.as_ref();
 
         let result = match self {
             DiffSide::Tree(tree) => {
@@ -158,8 +164,8 @@ impl DiffSide {
                         Object::Tree(_) => {
                             verbose!(options, "Reading tree...");
 
-                            let (set, map) =
-                                DiffSide::Tree(entry_hash).read(path, store, filter, options)?;
+                            let (set, map) = DiffSide::Tree(entry_hash)
+                                .read(path, store, filter, ignores, options)?;
 
                             for el in set {
                                 sum_set.insert(el);
@@ -186,13 +192,8 @@ impl DiffSide {
 
                 (sum_set, sum_map)
             }
-            DiffSide::Local(path_buf, root) => {
-                verbose!(
-                    options,
-                    "Reading from local source {:?} which is {} root...",
-                    path_buf,
-                    if root { "the" } else { "not the" }
-                );
+            DiffSide::Local(path_buf) => {
+                verbose!(options, "Reading from local source {:?}...", path_buf);
 
                 let dir = path_buf.read_dir().map_err(|e| (e, path_buf.clone()))?;
 
@@ -206,6 +207,7 @@ impl DiffSide {
                     if !filter
                         .iter()
                         .any(|f| path.starts_with(f) || f.starts_with(&path))
+                        || ignores.iter().any(|i| path == *i)
                     {
                         verbose!(options, "Filtered path {:?}.", path);
 
@@ -213,12 +215,6 @@ impl DiffSide {
                     }
 
                     let entry = entry.path();
-
-                    if root && entry_name == ".evs" {
-                        verbose!(options, "Filtered repo path {:?}.", entry);
-
-                        continue;
-                    }
 
                     if entry.is_file() {
                         verbose!(options, "Inserting blob...");
@@ -229,7 +225,7 @@ impl DiffSide {
                         verbose!(options, "Reading tree...");
 
                         let (set, map) =
-                            DiffSide::Local(entry, false).read(path, store, filter, options)?;
+                            DiffSide::Local(entry).read(path, store, filter, ignores, options)?;
 
                         for el in set {
                             sum_set.insert(el);
