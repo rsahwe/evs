@@ -100,11 +100,11 @@ evs status
 - [x] `.evsignore`
 - [x] `evs status`
 - [x] Better object printing
-- [ ] Globbing in `.evsignore`
-- [ ] `evs clone`
-- [ ] `evs checkout`
+- [x] Globbing in `.evsignore`
 - [ ] Better logging (possibly tracing)
-- [ ] Remote tools for evs
+- [ ] `evs checkout`
 - [ ] Branch tools for evs
+- [ ] `evs clone`
+- [ ] Remote tools for evs
 - [ ] Merge tools for evs
 - [ ] ...

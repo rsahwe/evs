@@ -9,6 +9,8 @@ use std::{
     path::PathBuf,
 };
 
+use glob::PatternError;
+
 use crate::store::{Hash, HashDisplay, PartialHash};
 
 #[derive(Debug)]
@@ -27,6 +29,7 @@ pub enum EvsError {
     NotACommit(Hash),
     NotATree(Hash),
     NoPreviousCommit,
+    PatternError(PatternError),
 }
 
 impl Display for EvsError {
@@ -62,6 +65,7 @@ impl Display for EvsError {
                 write!(f, "Object \"{}\" is not a tree", HashDisplay(hash))
             }
             EvsError::NoPreviousCommit => write!(f, "NULL object does not have a previous commit"),
+            EvsError::PatternError(err) => write!(f, "{}", err),
         }
     }
 }
@@ -83,6 +87,12 @@ impl From<(TryLockError, PathBuf)> for EvsError {
 impl From<(rmp_serde::decode::Error, Hash)> for EvsError {
     fn from(value: (rmp_serde::decode::Error, Hash)) -> Self {
         EvsError::CorruptStateDetected(CorruptState::InvalidObjectContent(value.1, value.0))
+    }
+}
+
+impl From<PatternError> for EvsError {
+    fn from(value: PatternError) -> Self {
+        EvsError::PatternError(value)
     }
 }
 

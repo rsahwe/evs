@@ -10,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use glob::Pattern;
 use similar::{DiffableStr, TextDiff, udiff::UnifiedDiff};
 
 use crate::{
@@ -34,7 +35,7 @@ impl DiffSide {
         to: Self,
         store: &Store,
         files: impl AsRef<[PathBuf]>,
-        ignores: impl AsRef<[PathBuf]>,
+        ignores: impl AsRef<[Pattern]>,
         options: &Cli,
     ) -> Result<(), EvsError> {
         trace!(
@@ -93,7 +94,7 @@ impl DiffSide {
         origin: impl AsRef<Path>,
         store: &Store,
         filter: impl AsRef<[PathBuf]>,
-        ignores: impl AsRef<[PathBuf]>,
+        ignores: impl AsRef<[Pattern]>,
         overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
@@ -209,7 +210,9 @@ impl DiffSide {
                         .iter()
                         .any(|f| path.starts_with(f) || f.starts_with(&path))
                         || (!overrides.iter().any(|o| o.starts_with(&path))
-                            && ignores.iter().any(|i| path.starts_with(i)))
+                            && ignores
+                                .iter()
+                                .any(|i| path.ancestors().any(|a| i.matches_path(a))))
                     {
                         verbose!(options, "Filtered path {:?}.", path);
 

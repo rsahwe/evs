@@ -8,6 +8,7 @@ use std::{
     time::SystemTime,
 };
 
+use glob::Pattern;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -310,7 +311,11 @@ impl Repository {
 
         verbose!(options, "Using ignores: {:?}.", ignores);
 
-        if ignores.iter().any(|i| relative.starts_with(i)) && !overrides.contains(relative) {
+        if ignores
+            .iter()
+            .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
+            && !overrides.contains(relative)
+        {
             if relative.starts_with(".evs")
                 || !confirmation(
                     &format!("{:?} is ignored, add anyway?", relative),
@@ -575,7 +580,7 @@ impl Repository {
     fn hash_dir(
         &self,
         path: &PathBuf,
-        ignores: impl AsRef<[PathBuf]>,
+        ignores: impl AsRef<[Pattern]>,
         overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<Hash, EvsError> {
@@ -614,7 +619,9 @@ impl Repository {
 
                 let relative = next.strip_prefix(&self.workspace).unwrap();
 
-                if ignores.iter().any(|i| i == relative)
+                if ignores
+                    .iter()
+                    .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
                     && !overrides.iter().any(|o| o.starts_with(relative))
                 {
                     verbose!(options, "Filtered child {:?}.", name);
@@ -978,7 +985,7 @@ impl Repository {
         Ok(commit.tree)
     }
 
-    pub fn get_ignores(&self, options: &Cli) -> Result<Vec<PathBuf>, EvsError> {
+    pub fn get_ignores(&self, options: &Cli) -> Result<Vec<Pattern>, EvsError> {
         trace!(options, "Repository::get_ignores(self)");
 
         let drop = DropAction(|| {
@@ -1004,8 +1011,8 @@ impl Repository {
             .map(str::trim)
             .filter(|l| l.len() != 0)
             .chain(once(".evs"))
-            .map(PathBuf::from)
-            .collect();
+            .map(Pattern::new)
+            .collect::<Result<_, _>>()?;
 
         let _ = ManuallyDrop::new(drop);
 
