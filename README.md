@@ -102,7 +102,7 @@ evs status
 - [x] Better object printing
 - [x] Globbing in `.evsignore`
 - [x] Better logging (possibly tracing)
-- [ ] Make confirmation a macro
+- [x] Make confirmation a macro
 - [ ] `evs checkout`
 - [ ] Branch tools for evs
 - [ ] `evs clone`

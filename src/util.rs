@@ -1,6 +1,6 @@
 use std::{
     env::var_os,
-    fmt::Display,
+    fmt::{Arguments, Display},
     io::{BufRead, IsTerminal, Write, stdin, stdout},
 };
 
@@ -8,8 +8,15 @@ use tracing::{debug, instrument};
 
 use crate::{cli::Cli, error::EvsError};
 
+#[macro_export]
+macro_rules! confirmation {
+    ($default:literal, $fmt:literal $($arg:tt)*) => {
+        $crate::util::confirmation_impl(format_args!($fmt $($arg)*), $default)
+    };
+}
+
 #[instrument(level = "debug", err(level = "debug"), skip_all)]
-pub fn confirmation(prompt: &str, default: bool) -> Result<bool, EvsError> {
+pub fn confirmation_impl(prompt: Arguments, default: bool) -> Result<bool, EvsError> {
     let yn = if default { "[Y/n]" } else { "[y/N]" };
 
     debug!("confirmation(\"{}\", {})", prompt, yn);

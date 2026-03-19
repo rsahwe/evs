@@ -13,14 +13,12 @@ use tracing::{debug, error, instrument, trace, warn};
 
 use crate::{
     cli::Cli,
+    confirmation,
     diff::DiffSide,
     error::{CorruptState, EvsError},
     objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
-    util::{
-        ADD_COLOR, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, confirmation,
-        get_color,
-    },
+    util::{ADD_COLOR, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, get_color},
 };
 
 #[derive(Debug)]
@@ -282,7 +280,7 @@ impl Repository {
             && !overrides.contains(relative)
         {
             if relative.starts_with(".evs")
-                || !confirmation(&format!("{:?} is ignored, add anyway?", relative), false)?
+                || !confirmation!(false, "{:?} is ignored, add anyway?", relative)?
             {
                 trace!("Filtered path {:?}.", relative);
 
@@ -788,15 +786,15 @@ impl Repository {
 
         if deletion_list.len() != 0 {
             println!(
-                "This will delete {} objects: ({} commits, {} trees, {} blobs)",
+                "This will delete {} object(s): ({} commit(s), {} tree(s), {} blob(s))",
                 deletion_list.len(),
                 commit_count,
                 tree_count,
                 blob_count
             );
 
-            if confirmation("Are you sure?", true)? {
-                warn!("Deleting {} objects...", deletion_list.len());
+            if confirmation!(true, "Are you sure?")? {
+                warn!("Deleting {} object(s)...", deletion_list.len());
 
                 for item in deletion_list {
                     trace!("Deleting {}", HashDisplay(&item));
