@@ -5,22 +5,20 @@ use std::{
     fmt::Write as FmtWrite,
     fs,
     io::{BufRead, Write as IoWrite, stdout},
-    mem::ManuallyDrop,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
 };
 
 use glob::Pattern;
 use similar::{DiffableStr, TextDiff, udiff::UnifiedDiff};
+use tracing::{debug, instrument, trace};
 
 use crate::{
     cli::Cli,
     error::{CorruptState, EvsError},
     objects::Object,
     store::{Hash, HashDisplay, Store},
-    trace,
-    util::{ADD_COLOR, DropAction, INFO_COLOR, NONE_COLOR, SUB_COLOR, get_color},
-    verbose,
+    util::{ADD_COLOR, INFO_COLOR, NONE_COLOR, SUB_COLOR, get_color},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -30,6 +28,7 @@ pub enum DiffSide {
 }
 
 impl DiffSide {
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn diff_with(
         from: Self,
         to: Self,
@@ -38,13 +37,12 @@ impl DiffSide {
         ignores: impl AsRef<[Pattern]>,
         options: &Cli,
     ) -> Result<(), EvsError> {
-        trace!(
-            options,
-            "Diffside::diff_with({:?}, {:?}, store, {:?}, {:?})",
+        debug!(
+            "Diffside::diff_with({:?}, {:?}, store, {:?}, {} ignores)",
             from,
             to,
             files.as_ref(),
-            ignores.as_ref()
+            ignores.as_ref().len()
         );
 
         if from == to {
@@ -54,17 +52,13 @@ impl DiffSide {
         let files = files.as_ref();
         let ignores = ignores.as_ref();
 
-        let drop = DropAction(|| {
-            trace!(options, "Diffside::diff_with(...) error");
-        });
+        let lhs = from.read("", store, files, ignores, &HashSet::new())?;
 
-        let lhs = from.read("", store, files, ignores, &HashSet::new(), options)?;
+        trace!("Read 'from' diff source: {:?}.", lhs.0);
 
-        verbose!(options, "Read 'from' diff source: {:?}.", lhs.0);
+        let rhs = to.read("", store, files, ignores, &lhs.0)?;
 
-        let rhs = to.read("", store, files, ignores, &lhs.0, options)?;
-
-        verbose!(options, "Read 'to' diff source: {:?}.", rhs.0);
+        trace!("Read 'to' diff source: {:?}.", rhs.0);
 
         let removals = lhs.0.difference(&rhs.0);
         let insertions = rhs.0.difference(&lhs.0);
@@ -82,13 +76,10 @@ impl DiffSide {
             options,
         );
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Diffside::diff_with(...) ok");
-
         Ok(())
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn read(
         self,
         origin: impl AsRef<Path>,
@@ -96,19 +87,14 @@ impl DiffSide {
         filter: impl AsRef<[PathBuf]>,
         ignores: impl AsRef<[Pattern]>,
         overrides: &HashSet<PathBuf>,
-        options: &Cli,
     ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
-        trace!(
-            options,
-            "Diffside::read(self, {:?}, store, {:?}, {:?})",
+        debug!(
+            "Diffside::read(self, {:?}, store, {:?}, {} ignores, {:?})",
             origin.as_ref(),
             filter.as_ref(),
-            ignores.as_ref()
+            ignores.as_ref().len(),
+            overrides
         );
-
-        let drop = DropAction(|| {
-            trace!(options, "Diffside::read(self, ...) error");
-        });
 
         let mut sum_set = HashSet::new();
         let mut sum_map = HashMap::new();
@@ -118,15 +104,11 @@ impl DiffSide {
 
         let result = match self {
             DiffSide::Tree(tree) => {
-                verbose!(
-                    options,
-                    "Reading from tree source \"{}\"...",
-                    HashDisplay(&tree)
-                );
+                trace!("Reading from tree source \"{}\"...", HashDisplay(&tree));
 
-                let (hash, tree) = store.lookup(&format!("{}", HashDisplay(&tree)), options)?;
+                let (hash, tree) = store.lookup(&format!("{}", HashDisplay(&tree)))?;
 
-                verbose!(options, "Found tree in store.");
+                trace!("Found tree in store.");
 
                 let tree = match tree {
                     Object::Tree(tree) => tree,
@@ -140,34 +122,30 @@ impl DiffSide {
                         .iter()
                         .any(|f| path.starts_with(f) || f.starts_with(&path))
                     {
-                        verbose!(options, "Filtered path {:?}.", path);
+                        trace!("Filtered path {:?}.", path);
 
                         continue;
                     }
 
-                    verbose!(options, "Reading path {:?}.", path);
+                    trace!("Reading path {:?}.", path);
 
                     let (entry_hash, content) =
-                        store.lookup(&format!("{}", HashDisplay(&entry.content)), options)?;
+                        store.lookup(&format!("{}", HashDisplay(&entry.content)))?;
 
-                    verbose!(
-                        options,
-                        "Found path content \"{}\".",
-                        HashDisplay(&entry_hash)
-                    );
+                    trace!("Found path content \"{}\".", HashDisplay(&entry_hash));
 
                     match content {
                         Object::Blob(content) => {
-                            verbose!(options, "Inserting blob...");
+                            trace!("Inserting blob {:?}...", path);
 
                             sum_set.insert(path.clone());
                             sum_map.insert(path, content);
                         }
                         Object::Tree(_) => {
-                            verbose!(options, "Reading tree...");
+                            trace!("Reading tree {:?}...", path);
 
                             let (set, map) = DiffSide::Tree(entry_hash)
-                                .read(path, store, filter, ignores, overrides, options)?;
+                                .read(path, store, filter, ignores, overrides)?;
 
                             for el in set {
                                 sum_set.insert(el);
@@ -177,7 +155,7 @@ impl DiffSide {
                                 sum_map.insert(k, v);
                             }
 
-                            verbose!(options, "Finished inserting tree.");
+                            trace!("Finished inserting tree.");
                         }
                         Object::Null => {
                             return Err(EvsError::CorruptStateDetected(
@@ -195,7 +173,7 @@ impl DiffSide {
                 (sum_set, sum_map)
             }
             DiffSide::Local(path_buf) => {
-                verbose!(options, "Reading from local source {:?}...", path_buf);
+                trace!("Reading from local source {:?}...", path_buf);
 
                 let dir = path_buf.read_dir().map_err(|e| (e, path_buf.clone()))?;
 
@@ -214,7 +192,7 @@ impl DiffSide {
                                 .iter()
                                 .any(|i| path.ancestors().any(|a| i.matches_path(a))))
                     {
-                        verbose!(options, "Filtered path {:?}.", path);
+                        trace!("Filtered path {:?}.", path);
 
                         continue;
                     }
@@ -222,15 +200,15 @@ impl DiffSide {
                     let entry = entry.path();
 
                     if entry.is_file() {
-                        verbose!(options, "Inserting blob...");
+                        trace!("Inserting blob {:?}...", path);
 
                         sum_set.insert(path.clone());
-                        sum_map.insert(path.clone(), fs::read(&path).map_err(|e| (e, path))?);
+                        sum_map.insert(path.clone(), fs::read(&entry).map_err(|e| (e, path))?);
                     } else if entry.is_dir() {
-                        verbose!(options, "Reading tree...");
+                        trace!("Reading tree {:?}...", path);
 
-                        let (set, map) = DiffSide::Local(entry)
-                            .read(path, store, filter, ignores, overrides, options)?;
+                        let (set, map) =
+                            DiffSide::Local(entry).read(path, store, filter, ignores, overrides)?;
 
                         for el in set {
                             sum_set.insert(el);
@@ -240,10 +218,9 @@ impl DiffSide {
                             sum_map.insert(k, v);
                         }
 
-                        verbose!(options, "Finished inserting tree.");
+                        trace!("Finished inserting tree.");
                     } else {
-                        verbose!(
-                            options,
+                        trace!(
                             "Skipping file {:?}, because it is neither a file nor a directory.",
                             entry
                         );
@@ -254,11 +231,7 @@ impl DiffSide {
             }
         };
 
-        verbose!(options, "Finished reading.");
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Diffside::read(self, ...) ok");
+        trace!("Finished reading.");
 
         Ok(result)
     }
@@ -267,13 +240,14 @@ impl DiffSide {
 pub struct DiffFormat;
 
 impl DiffFormat {
+    #[instrument(level = "debug", skip_all)]
     pub fn print(
         removals: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>)>,
         insertions: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>)>,
         modifications: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>, impl AsRef<[u8]>)>,
         options: &Cli,
     ) {
-        trace!(options, "DiffFormat::print(...)");
+        debug!("DiffFormat::print(...)");
 
         let print_color = get_color(options);
 
@@ -352,8 +326,6 @@ impl DiffFormat {
 
             DiffFormat::write_diff(diff, print_color);
         }
-
-        trace!(options, "DiffFormat::print(...) done");
     }
 
     pub fn binary_to_text(binary: impl AsRef<[u8]>) -> String {

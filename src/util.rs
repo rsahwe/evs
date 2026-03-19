@@ -2,72 +2,23 @@ use std::{
     env::var_os,
     fmt::Display,
     io::{BufRead, IsTerminal, Write, stdin, stdout},
-    mem::ManuallyDrop,
 };
+
+use tracing::{debug, instrument};
 
 use crate::{cli::Cli, error::EvsError};
 
-pub struct DropAction<F: Fn()>(pub F);
+#[instrument(level = "debug", err(level = "debug"), skip_all)]
+pub fn confirmation(prompt: &str, default: bool) -> Result<bool, EvsError> {
+    let yn = if default { "[Y/n]" } else { "[y/N]" };
 
-impl<F: Fn()> Drop for DropAction<F> {
-    fn drop(&mut self) {
-        (self.0)()
-    }
-}
-
-#[macro_export]
-macro_rules! none {
-    ($($arg:tt)*) => {
-        eprintln!($($arg)*)
-    };
-}
-
-#[macro_export]
-macro_rules! log {
-    ($options:expr, $fmt:literal $($arg:tt)*) => {{
-        let options: &$crate::cli::Cli = $options;
-        if options.verbose >= $crate::cli::VERBOSITY_LOG {
-            eprintln!(concat!("# ", $fmt) $($arg)*)
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! trace {
-    ($options:expr, $fmt:literal $($arg:tt)*) => {{
-        let options: &$crate::cli::Cli = $options;
-        if options.verbose >= $crate::cli::VERBOSITY_TRACE {
-            eprintln!(concat!("## ", $fmt) $($arg)*)
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! verbose {
-    ($options:expr, $fmt:literal $($arg:tt)*) => {{
-        let options: &$crate::cli::Cli = $options;
-        if options.verbose >= $crate::cli::VERBOSITY_ALL {
-            eprintln!(concat!("### ", $fmt) $($arg)*)
-        }
-    }};
-}
-
-pub fn confirmation(prompt: &str, default: bool, options: &Cli) -> Result<bool, EvsError> {
-    trace!(options, "confirmation({}, {})", prompt, default);
-
-    let drop = DropAction(|| {
-        trace!(options, "confirmation(...) err");
-    });
+    debug!("confirmation(\"{}\", {})", prompt, yn);
 
     let mut stdout = stdout().lock();
     let mut stdin = stdin().lock();
 
     stdout
-        .write_fmt(format_args!(
-            "{} {}: ",
-            prompt,
-            if default { "[Y/n]" } else { "[y/N]" }
-        ))
+        .write_fmt(format_args!("{} {}: ", prompt, yn))
         .map_err(|e| (e, "-".to_owned().into()))?;
 
     stdout.flush().map_err(|e| (e, "-".to_owned().into()))?;
@@ -85,10 +36,6 @@ pub fn confirmation(prompt: &str, default: bool, options: &Cli) -> Result<bool, 
         s if s.eq_ignore_ascii_case("no") => false,
         "" | _ => default,
     };
-
-    let _ = ManuallyDrop::new(drop);
-
-    trace!(options, "confirmation(...) done");
 
     Ok(response)
 }

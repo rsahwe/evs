@@ -7,14 +7,15 @@ use std::{
 
 use clap::{ArgAction, Parser, Subcommand};
 use enable_ansi_support::enable_ansi_support;
+use tracing::{Level, info, trace};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitExt};
 
 use crate::{
     diff::DiffSide,
     error::EvsError,
-    log, none,
     repo::Repository,
     store::{Hash, HashDisplay},
-    verbose,
+    util::get_color,
 };
 
 pub const VERBOSITY_NONE: u8 = 0;
@@ -124,17 +125,42 @@ impl Cli {
             self.no_color = true;
         }
 
+        let subscriber = tracing_subscriber::FmtSubscriber::builder()
+            .with_ansi(get_color(&self))
+            .with_ansi_sanitization(true)
+            .with_file(true)
+            .with_level(true)
+            .with_line_number(true)
+            .with_span_events(if self.verbose > 2 {
+                FmtSpan::EXIT
+            } else {
+                FmtSpan::NONE
+            })
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .with_env_filter(EnvFilter::from_default_env())
+            .without_time()
+            .with_max_level(match self.verbose {
+                0 => Level::WARN,
+                1 => Level::INFO,
+                2 => Level::DEBUG,
+                3 | _ => Level::TRACE,
+            })
+            .compact()
+            .finish()
+            .set_default();
+
         macro_rules! get_repo {
             () => {{
-                log!(
-                    &self,
+                info!(
                     "Searching for repository starting from {:?}:",
                     AsRef::<Path>::as_ref(".")
                 );
 
                 let repo = Repository::find(".", &self)?;
 
-                log!(&self, "Found repository at {:?}.", repo.repository);
+                info!("Found repository at {:?}.", repo.repository);
 
                 repo
             }};
@@ -144,31 +170,31 @@ impl Cli {
             Commands::Init { path } => {
                 let path = path.as_ref().map(ToOwned::to_owned).unwrap_or(".".into());
 
-                log!(&self, "Creating repository at {:?}...", path);
+                info!("Creating repository at {:?}...", path);
 
                 let repo = Repository::create(path, &self)?;
 
-                log!(&self, "Created repository.");
+                info!("Created repository.");
 
                 drop(repo);
 
-                none!("Repository initialized successfully.");
+                println!("Repository initialized successfully.");
             }
             Commands::Check => {
                 let repo = get_repo!();
 
-                repo.check(&self)?;
+                repo.check()?;
 
                 drop(repo);
 
-                none!("Repository checked successfully.");
+                println!("Repository checked successfully.");
             }
             Commands::Cat { raw, r#ref } => {
                 let repo = get_repo!();
 
-                let (hash, obj) = repo.lookup(r#ref, &self)?;
+                let (hash, obj) = repo.lookup(r#ref)?;
 
-                log!(&self, "Printing object \"{}\":", HashDisplay(&hash));
+                info!("Printing object \"{}\":", HashDisplay(&hash));
 
                 if !raw {
                     println!("{}", obj);
@@ -183,7 +209,7 @@ impl Cli {
             Commands::Add { paths } => {
                 let mut repo = get_repo!();
 
-                verbose!(&self, "Adding {} paths:", paths.len());
+                trace!("Adding {} paths:", paths.len());
 
                 let (set, map) = DiffSide::Tree(repo.info.stage()).read(
                     "",
@@ -191,7 +217,6 @@ impl Cli {
                     &[AsRef::<Path>::as_ref("").to_path_buf()],
                     &[],
                     &HashSet::new(),
-                    &self,
                 )?;
 
                 drop(map);
@@ -199,23 +224,23 @@ impl Cli {
                 for file in paths {
                     repo.add(file, &set, &self)?;
 
-                    log!(&self, "Added {:?}", file);
+                    info!("Added {:?}", file);
                 }
 
-                log!(&self, "Finished adding.")
+                info!("Finished adding.")
             }
             Commands::Sub { paths } => {
                 let mut repo = get_repo!();
 
-                verbose!(&self, "Removing {} paths:", paths.len());
+                trace!("Removing {} paths:", paths.len());
 
                 for file in paths {
-                    repo.sub(file, &self)?;
+                    repo.sub(file)?;
 
-                    log!(&self, "Removed {:?}", file);
+                    info!("Removed {:?}", file);
                 }
 
-                log!(&self, "Finished removing.")
+                info!("Finished removing.")
             }
             Commands::Commit {
                 message,
@@ -226,8 +251,7 @@ impl Cli {
 
                 let time = SystemTime::now();
 
-                verbose!(
-                    &self,
+                trace!(
                     "Committing by {} <{}> at {:?} with message of length {}",
                     name,
                     email,
@@ -243,9 +267,9 @@ impl Cli {
                     &self,
                 )?;
 
-                log!(&self, "Finished committing.");
+                info!("Finished committing.");
 
-                none!("HEAD is now at \"{}\".", HashDisplay(&commit));
+                println!("HEAD is now at \"{}\".", HashDisplay(&commit));
             }
             Commands::Log {
                 r#ref,
@@ -256,23 +280,23 @@ impl Cli {
 
                 repo.log(r#ref, *limit, *oneline, &self)?;
 
-                log!(&self, "Finished printing log.");
+                info!("Finished printing log.");
             }
             Commands::Gc => {
                 let repo = get_repo!();
 
                 repo.gc(&self)?;
 
-                log!(&self, "Finished collecting garbage.");
+                info!("Finished collecting garbage.");
             }
             Commands::Resolve { r#ref } => {
                 let repo = get_repo!();
 
-                let hash = repo.resolve(&r#ref, &self)?;
+                let hash = repo.resolve(&r#ref)?;
 
-                verbose!(&self, "\"{}\" resolved to \"{}\".", r#ref, hash);
+                trace!("\"{}\" resolved to \"{}\".", r#ref, hash);
 
-                none!("{}", hash);
+                println!("{}", hash);
             }
             Commands::Diff {
                 staged,
@@ -285,25 +309,21 @@ impl Cli {
                 let (from, to) = if *staged {
                     let to = DiffSide::Tree(repo.info.stage());
 
-                    let from = DiffSide::Tree(repo.get_tree(repo.info.head(), &self)?);
+                    let from = DiffSide::Tree(repo.get_tree(repo.info.head())?);
 
                     (from, to)
                 } else {
                     (
                         DiffSide::Tree(
                             from.as_ref()
-                                .map(|f| {
-                                    Ok::<Hash, EvsError>(
-                                        repo.get_tree(repo.lookup(f, &self)?.0, &self)?,
-                                    )
-                                })
+                                .map(|f| Ok::<Hash, EvsError>(repo.get_tree(repo.lookup(f)?.0)?))
                                 .transpose()?
                                 .unwrap_or(repo.info.stage()),
                         ),
                         to.as_ref()
                             .map(|t| {
                                 Ok::<DiffSide, EvsError>(DiffSide::Tree(
-                                    repo.get_tree(repo.lookup(t, &self)?.0, &self)?,
+                                    repo.get_tree(repo.lookup(t)?.0)?,
                                 ))
                             })
                             .transpose()?
@@ -311,7 +331,7 @@ impl Cli {
                     )
                 };
 
-                verbose!(&self, "Diffing from {:?} to {:?}:", from, to);
+                trace!("Diffing from {:?} to {:?}:", from, to);
 
                 DiffSide::diff_with(
                     from,
@@ -331,16 +351,18 @@ impl Cli {
                     &self,
                 )?;
 
-                log!(&self, "Finished diff.");
+                info!("Finished diff.");
             }
             Commands::Status => {
                 let repo = get_repo!();
 
                 repo.status(&self)?;
 
-                log!(&self, "Finished reporting status.");
+                info!("Finished reporting status.");
             }
         }
+
+        drop(subscriber);
 
         Ok(())
     }

@@ -3,20 +3,16 @@ use std::{
     fmt::Display,
     fs::{self, OpenOptions},
     io::{Read, Write},
-    mem::ManuallyDrop,
     path::PathBuf,
 };
 
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
+use tracing::{debug, instrument, trace};
 
 use crate::{
-    cli::Cli,
     error::{CorruptState, EvsError},
     objects::Object,
-    trace,
-    util::DropAction,
-    verbose,
 };
 
 pub type Hash = [u8; 32];
@@ -51,12 +47,9 @@ impl Store {
     }
 
     /// Assumes a valid store and might cause unintended behaviour
-    pub fn insert(&self, mut obj: Object, options: &Cli) -> Result<Hash, EvsError> {
-        trace!(options, "Store::insert(self, ...)");
-
-        let drop = DropAction(|| {
-            trace!(options, "Store::insert(self, ...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn insert(&self, mut obj: Object) -> Result<Hash, EvsError> {
+        debug!("Store::insert(self, ...)");
 
         match &mut obj {
             Object::Tree(entries) => {
@@ -67,13 +60,13 @@ impl Store {
 
         let data = rmp_serde::to_vec(&obj).expect("msgpack failed");
 
-        verbose!(options, "Serialized object to size {}", data.len());
+        trace!("Serialized object to size {}.", data.len());
 
         let hash: Hash = Sha256::digest(&data).into();
 
         let hash_display = format!("{}", HashDisplay(&hash));
 
-        verbose!(options, "Data hashed to \"{}\".", hash_display);
+        trace!("Data hashed to \"{}\".", hash_display);
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
 
@@ -85,8 +78,7 @@ impl Store {
             .finish()
             .expect("gzip encoder failed: io error on vec");
 
-        verbose!(
-            options,
+        trace!(
             "Compressed data from {} to {} bytes.",
             data.len(),
             compressed.len()
@@ -94,15 +86,12 @@ impl Store {
 
         let target = self.path.join(&hash_display);
 
-        let hash = if target.exists() {
-            verbose!(
-                options,
-                "Object path exists! TODO: Maybe figure out strategy for this."
-            );
+        if target.exists() {
+            trace!("Object path exists! TODO: Maybe figure out strategy for this.");
 
-            hash
+            Ok(hash)
         } else {
-            verbose!(options, "Object path does not exist, inserting...");
+            trace!("Object path does not exist, inserting...");
 
             let mut file = OpenOptions::new()
                 .create_new(true)
@@ -113,27 +102,21 @@ impl Store {
             file.write_all(&compressed)
                 .map_err(|e| (e, target.clone()))?;
 
-            verbose!(options, "Wrote object to store.");
+            trace!("Wrote object to store.");
 
-            hash
-        };
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Store::insert(self, ...) done");
-
-        Ok(hash)
+            Ok(hash)
+        }
     }
 
-    pub fn lookup(&self, id: &str, options: &Cli) -> Result<(Hash, Object), EvsError> {
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn lookup(&self, id: &str) -> Result<(Hash, Object), EvsError> {
         if size_of_val(id) > size_of::<Hash>() * 2 {
-            trace!(options, "Store::lookup(self, <overlength hash>) wrong args");
+            debug!("Store::lookup(self, <overlength hash>)");
 
             return Err(EvsError::ObjectNotInStore(id.to_owned()));
         }
 
-        trace!(
-            options,
+        debug!(
             "Store::lookup(self, \"{}{}\")",
             id,
             if size_of_val(id) < size_of::<Hash>() * 2 {
@@ -142,10 +125,6 @@ impl Store {
                 ""
             }
         );
-
-        let drop = DropAction(|| {
-            trace!(options, "Store::lookup(self, ...) error");
-        });
 
         let mut target = None;
 
@@ -193,11 +172,11 @@ impl Store {
             ));
         }
 
-        verbose!(options, "Found object {:?}.", target);
+        trace!("Found object {:?}.", target);
 
         let content = fs::read(&target).map_err(|e| (e, target.clone()))?;
 
-        verbose!(options, "Read object of compressed size {}.", content.len());
+        trace!("Read object of compressed size {}.", content.len());
 
         let mut decoder = GzDecoder::new(&*content);
 
@@ -207,7 +186,7 @@ impl Store {
             EvsError::CorruptStateDetected(CorruptState::InvalidCompression(target.clone(), e))
         })?;
 
-        verbose!(options, "Decompressed to size {}.", decompressed.len());
+        trace!("Decompressed to size {}.", decompressed.len());
 
         let real_hash: Hash = Sha256::digest(&decompressed).into();
 
@@ -218,36 +197,24 @@ impl Store {
             )));
         }
 
-        verbose!(options, "Validated hash.");
+        trace!("Validated hash.");
 
         let deserialized =
             rmp_serde::from_slice::<Object>(&decompressed).map_err(|e| (e, real_hash))?;
 
-        verbose!(options, "Deserialized successfully.");
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Store::lookup(self, ...) done");
+        trace!("Deserialized successfully.");
 
         Ok((real_hash, deserialized))
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn check(
         &self,
         mut found: HashSet<Hash>,
         required: impl AsRef<[Hash]>,
         dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
-        options: &Cli,
     ) -> Result<HashSet<Hash>, EvsError> {
-        trace!(
-            options,
-            "Store::check(self, <{} hash(es)>)",
-            required.as_ref().len()
-        );
-
-        let drop = DropAction(|| {
-            trace!(options, "Store::check(self, ...) error");
-        });
+        debug!("Store::check(self, <{} hash(es)>)", required.as_ref().len());
 
         let (mut required, mut dependencies) = {
             let mut hm = HashSet::new();
@@ -261,11 +228,7 @@ impl Store {
             (hm, dep)
         };
 
-        verbose!(
-            options,
-            "Initially required to find {} object(s).",
-            required.len()
-        );
+        trace!("Initially required to find {} object(s).", required.len());
 
         for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
             let obj = obj.map_err(|e| (e, self.path.clone()))?;
@@ -280,19 +243,18 @@ impl Store {
                 ));
             }
 
-            let (hash, obj) = self.lookup(name.to_str().unwrap(), options)?;
+            let (hash, obj) = self.lookup(name.to_str().unwrap())?;
 
-            verbose!(options, "Validated \"{}\".", HashDisplay(&hash));
+            trace!("Validated \"{}\".", HashDisplay(&hash));
 
             match obj {
-                Object::Null => verbose!(options, "Found the NULL object! :)"),
-                Object::Blob(data) => verbose!(options, "Found blob of size {}.", data.len()),
+                Object::Null => trace!("Found the NULL object! :)"),
+                Object::Blob(data) => trace!("Found blob of size {}.", data.len()),
                 Object::Tree(items) => {
-                    verbose!(options, "Found tree with {} child(ren).", items.len());
+                    trace!("Found tree with {} child(ren).", items.len());
 
                     for item in items {
-                        verbose!(
-                            options,
+                        trace!(
                             "Requiring \"{}\" for \"{}\".",
                             HashDisplay(&item.content),
                             HashDisplay(&hash)
@@ -306,15 +268,13 @@ impl Store {
                     }
                 }
                 Object::Commit(commit) => {
-                    verbose!(
-                        options,
+                    trace!(
                         "Found commit with state \"{}\" and parent \"{}\".",
                         HashDisplay(&commit.tree),
                         HashDisplay(&commit.parent)
                     );
 
-                    verbose!(
-                        options,
+                    trace!(
                         "Requiring \"{}\" for \"{}\".",
                         HashDisplay(&commit.tree),
                         HashDisplay(&hash)
@@ -326,8 +286,7 @@ impl Store {
                         dependencies.get(&commit.tree).unwrap_or(&0) + 1,
                     );
 
-                    verbose!(
-                        options,
+                    trace!(
                         "Requiring \"{}\" for \"{}\".",
                         HashDisplay(&commit.parent),
                         HashDisplay(&hash)
@@ -349,8 +308,7 @@ impl Store {
             acc + 1
         });
 
-        verbose!(
-            options,
+        trace!(
             "Finished validating {}/{} (+{}) objects.",
             required.intersection(&found).count(),
             required.len(),
@@ -366,55 +324,41 @@ impl Store {
         }
 
         if let Some(dependency_info) = dependency_info {
-            verbose!(options, "Storing dependency info.");
+            trace!("Storing dependency info.");
 
             let _ = dependency_info.insert(dependencies);
         }
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Store::check(self, ...) done");
-
         Ok(found)
     }
 
-    pub fn remove(&self, path: Hash, options: &Cli) -> Result<(), EvsError> {
-        trace!(options, "Store::remove(self, \"{}\")", HashDisplay(&path));
-
-        let drop = DropAction(|| {
-            trace!(options, "Store::remove(self, ...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn remove(&self, path: Hash) -> Result<(), EvsError> {
+        debug!("Store::remove(self, \"{}\")", HashDisplay(&path));
 
         let path = self.path.join(&format!("{}", HashDisplay(&path)));
 
-        verbose!(options, "Deleting {:?}", &path);
+        trace!("Deleting {:?}", &path);
 
         fs::remove_file(&path).map_err(|e| (e, path))?;
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Store::remove(self, ...) done");
 
         Ok(())
     }
 
-    pub fn resolve_rest(&self, r#ref: String, options: &Cli) -> Result<String, EvsError> {
-        trace!(options, "Store::resolve_rest(self, \"{}\")", r#ref);
-
-        let drop = DropAction(|| {
-            trace!(options, "Store::resolve_rest(self, ...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn resolve_rest(&self, r#ref: String) -> Result<String, EvsError> {
+        debug!("Store::resolve_rest(self, \"{}\")", r#ref);
 
         let mut target = None;
 
         if size_of_val(r#ref.as_str()) == size_of::<Hash>() * 2 {
             let path = self.path.join(&r#ref);
 
-            verbose!(options, "Fast lookup of {:?}...", path);
+            trace!("Fast lookup of {:?}...", path);
 
             target = fs::exists(&path).is_ok().then_some(path);
         } else {
-            verbose!(options, "Slow lookup...");
+            trace!("Slow lookup...");
 
             for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
                 let obj = obj.map_err(|e| (e, self.path.clone()))?;
@@ -424,7 +368,7 @@ impl Store {
                 if let Some(hash) = name.file_name()
                     && hash.as_encoded_bytes().starts_with(r#ref.as_bytes())
                 {
-                    verbose!(options, "Found {:?}.", hash);
+                    trace!("Found {:?}.", hash);
 
                     if let Some(target) = target {
                         return Err(EvsError::AmbiguousObject(
@@ -457,18 +401,17 @@ impl Store {
             ));
         }
 
-        verbose!(options, "Validated name successfully.");
+        trace!("Validated name successfully.");
 
         let resolved = target_name.to_str().unwrap().to_owned();
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Store::resolve_rest(self, ...) done");
 
         Ok(resolved)
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn status(&self) -> Result<(usize, usize), EvsError> {
+        debug!("Store::status(self)");
+
         self.path
             .read_dir()
             .map_err(|e| (e, self.path.clone()))?

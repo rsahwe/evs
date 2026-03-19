@@ -3,27 +3,24 @@ use std::{
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write, stdout},
     iter::{Peekable, once},
-    mem::ManuallyDrop,
     path::{Components, Path, PathBuf},
     time::SystemTime,
 };
 
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, instrument, trace, warn};
 
 use crate::{
     cli::Cli,
     diff::DiffSide,
     error::{CorruptState, EvsError},
-    log, none,
     objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
-    trace,
     util::{
-        ADD_COLOR, DropAction, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay,
-        confirmation, get_color,
+        ADD_COLOR, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, confirmation,
+        get_color,
     },
-    verbose,
 };
 
 #[derive(Debug)]
@@ -36,19 +33,16 @@ pub struct Repository {
 }
 
 impl Repository {
-    pub fn open(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        trace!(options, "Repository::open({:?})", path.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::open(...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn open(path: impl AsRef<Path>, _options: &Cli) -> Result<Repository, EvsError> {
+        debug!("Repository::open({:?})", path.as_ref());
 
         let _ = path
             .as_ref()
             .read_dir()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        verbose!(options, "Workspace exists and is a directory.");
+        trace!("Workspace exists and is a directory.");
 
         let repo = path.as_ref().join(".evs");
 
@@ -62,11 +56,11 @@ impl Repository {
             ));
         }
 
-        verbose!(options, "Repository exists and is a directory.");
+        trace!("Repository exists and is a directory.");
 
         let repo = repo.canonicalize().expect("repo exists and is a directory");
 
-        verbose!(options, "Repository directory was canonicalized.");
+        trace!("Repository directory was canonicalized.");
 
         let store = repo.join("store");
 
@@ -82,7 +76,7 @@ impl Repository {
             ));
         }
 
-        verbose!(options, "Store exists and is a directory.");
+        trace!("Store exists and is a directory.");
 
         let lockfile_path = repo.join("lock");
 
@@ -106,7 +100,7 @@ impl Repository {
 
         lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
-        verbose!(options, "Successfully obtained lock.");
+        trace!("Successfully obtained lock.");
 
         let mut repo_info = vec![];
 
@@ -117,7 +111,7 @@ impl Repository {
         let repo_info =
             rmp_serde::from_slice(&repo_info).map_err(|e| EvsError::RepositoryInfoCorrupt(e))?;
 
-        verbose!(options, "Read repository info successfully.");
+        trace!("Read repository info successfully.");
 
         let repository = Repository {
             workspace: path.as_ref().to_path_buf(),
@@ -127,28 +121,21 @@ impl Repository {
             info: repo_info,
         };
 
-        verbose!(options, "Created repository.");
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::open(...) done");
+        trace!("Created repository.");
 
         Ok(repository)
     }
 
-    pub fn create(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        trace!(options, "Repository::create({:?})", path.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::create(...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn create(path: impl AsRef<Path>, _options: &Cli) -> Result<Repository, EvsError> {
+        debug!("Repository::create(self, {:?})", path.as_ref());
 
         let _ = path
             .as_ref()
             .read_dir()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        verbose!(options, "Workspace exists and is a directory.");
+        trace!("Workspace exists and is a directory.");
 
         let repo = path.as_ref().join(".evs");
 
@@ -156,11 +143,11 @@ impl Repository {
             .create(&repo)
             .map_err(|e| (e, repo.clone()))?;
 
-        verbose!(options, "Created repository directory.");
+        trace!("Created repository directory.");
 
         let repo = repo.canonicalize().expect("repo dir was just created");
 
-        verbose!(options, "Repository directory was canonicalized.");
+        trace!("Repository directory was canonicalized.");
 
         let store = repo.join("store");
 
@@ -168,17 +155,17 @@ impl Repository {
             .create(&store)
             .map_err(|e| (e, store.clone()))?;
 
-        verbose!(options, "Created store directory.");
+        trace!("Created store directory.");
 
         let store = Store::new(store);
 
-        let root = store.insert(Object::Null, options)?;
+        let root = store.insert(Object::Null)?;
 
-        verbose!(options, "Inserted null object.");
+        trace!("Inserted null object.");
 
-        let empty_stage = store.insert(Object::Tree(vec![]), options)?;
+        let empty_stage = store.insert(Object::Tree(vec![]))?;
 
-        verbose!(options, "Inserted empty tree.");
+        trace!("Inserted empty tree.");
 
         let lockfile_path = repo.join("lock");
 
@@ -191,7 +178,7 @@ impl Repository {
 
         lockfile.try_lock().map_err(|e| (e, repo.clone()))?;
 
-        verbose!(options, "Created and locked lockfile.");
+        trace!("Created and locked lockfile.");
 
         let repo_info = RepositoryInfo {
             head: root,
@@ -203,7 +190,7 @@ impl Repository {
             .write_all(&rmp_serde::to_vec(&repo_info).expect("msgpack failed"))
             .map_err(|e| (e, lockfile_path.clone()))?;
 
-        verbose!(options, "Wrote repository info into the lockfile.");
+        trace!("Wrote repository info into the lockfile.");
 
         let repository = Repository {
             workspace: path.as_ref().to_path_buf(),
@@ -213,39 +200,28 @@ impl Repository {
             info: repo_info,
         };
 
-        verbose!(options, "Created repository.");
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::create(...) done");
+        trace!("Created repository.");
 
         Ok(repository)
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn find(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
-        trace!(options, "Repository::find({:?})", path.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::find(...) error");
-        });
+        debug!("Repository::find({:?})", path.as_ref());
 
         let mut path = path
             .as_ref()
             .canonicalize()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        verbose!(options, "Canonicalized path.");
+        trace!("Canonicalized path.");
 
         loop {
-            verbose!(options, "Trying path {:?}:", path);
+            trace!("Trying path {:?}:", path);
 
             match Self::open(&path, options) {
                 Ok(repo) => {
-                    verbose!(options, "Found repository in {:?}.", path);
-
-                    let _ = ManuallyDrop::new(drop);
-
-                    trace!(options, "Repository::find(...) done");
+                    trace!("Found repository in {:?}.", path);
 
                     return Ok(repo);
                 }
@@ -261,45 +237,34 @@ impl Repository {
         }
     }
 
-    pub fn check(&self, options: &Cli) -> Result<(), EvsError> {
-        trace!(options, "Repository::check(self)");
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn check(&self) -> Result<(), EvsError> {
+        debug!("Repository::check(self)");
 
-        let drop = DropAction(|| {
-            trace!(options, "Repository::check(self) error");
-        });
-
-        self.store.check(
-            HashSet::new(),
-            &[self.info.head(), self.info.stage()],
-            None,
-            options,
-        )?;
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::check(self) done");
-
-        Ok(())
+        self.store
+            .check(HashSet::new(), &[self.info.head(), self.info.stage()], None)
+            .map(|_| ())
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn add(
         &mut self,
         path: impl AsRef<Path>,
         overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(), EvsError> {
-        trace!(options, "Repository::add(self, {:?})", path.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::add(self, ...) error");
-        });
+        debug!(
+            "Repository::add(self, {:?}, {:?})",
+            path.as_ref(),
+            overrides
+        );
 
         let canon = path
             .as_ref()
             .canonicalize()
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        verbose!(options, "Canonicalized path to {:?}", canon);
+        trace!("Canonicalized path to {:?}", canon);
 
         if !canon.starts_with(&self.workspace) {
             return Err(EvsError::PathOutsideOfRepo(canon));
@@ -309,7 +274,7 @@ impl Repository {
 
         let ignores = self.get_ignores(options)?;
 
-        verbose!(options, "Using ignores: {:?}.", ignores);
+        trace!("Using ignores: {:?}.", ignores);
 
         if ignores
             .iter()
@@ -317,92 +282,71 @@ impl Repository {
             && !overrides.contains(relative)
         {
             if relative.starts_with(".evs")
-                || !confirmation(
-                    &format!("{:?} is ignored, add anyway?", relative),
-                    false,
-                    options,
-                )?
+                || !confirmation(&format!("{:?} is ignored, add anyway?", relative), false)?
             {
-                verbose!(options, "Filtered path {:?}.", relative);
-
-                let _ = ManuallyDrop::new(drop);
-
-                trace!(options, "Repository::add(self, ...) done");
+                trace!("Filtered path {:?}.", relative);
 
                 return Ok(());
             }
         }
 
         let hash = if canon.is_dir() {
-            let hash = self.hash_dir(&canon, ignores, overrides, options)?;
+            let hash = self.hash_dir(&canon, ignores, overrides)?;
 
             if relative == "" {
-                verbose!(options, "Hashed contents of path.");
+                trace!("Hashed contents of path.");
 
-                verbose!(options, "Recomputed stage.");
+                trace!("Recomputed stage.");
 
                 if self.info.stage() == hash {
-                    verbose!(options, "New stage is equal to old stage.");
+                    trace!("New stage is equal to old stage.");
                 } else {
                     self.info.set_stage(hash);
                 }
-
-                let _ = ManuallyDrop::new(drop);
-
-                trace!(options, "Repository::add(self, ...) done");
 
                 return Ok(());
             }
 
             hash
         } else {
-            self.store.insert(
-                Object::Blob(fs::read(&canon).map_err(|e| (e, canon.clone()))?),
-                options,
-            )?
+            self.store.insert(Object::Blob(
+                fs::read(&canon).map_err(|e| (e, canon.clone()))?,
+            ))?
         };
 
-        verbose!(options, "Hashed contents of path.");
+        trace!("Hashed contents of path.");
 
         let new_stage = match self.update_stage(
             relative.components().peekable(),
             relative,
             Some(hash),
             self.info.stage(),
-            options,
         )? {
             Some(stage) => stage,
-            None => self.store.insert(Object::Tree(vec![]), options)?,
+            None => self.store.insert(Object::Tree(vec![]))?,
         };
 
-        verbose!(options, "Recomputed stage.");
+        trace!("Recomputed stage.");
 
         if self.info.stage() == new_stage {
-            verbose!(options, "New stage is equal to old stage.")
+            trace!("New stage is equal to old stage.")
         } else {
             self.info.set_stage(new_stage);
         }
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::add(self, ...) done");
-
         Ok(())
     }
 
-    pub fn sub(&mut self, path: impl AsRef<Path>, options: &Cli) -> Result<(), EvsError> {
-        trace!(options, "Repository::sub(self, {:?})", path.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::sub(self, ...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn sub(&mut self, path: impl AsRef<Path>) -> Result<(), EvsError> {
+        debug!("Repository::sub(self, {:?})", path.as_ref());
 
         let canon = path
             .as_ref()
             .canonicalize() //TODO: ALTERNATIVE WITH PARTIAL CANONICALIZE (CUSTOM?)
             .map_err(|e| (e, path.as_ref().to_path_buf()))?;
 
-        verbose!(options, "Canonicalized path to {:?}", canon);
+        trace!("Canonicalized path to {:?}", canon);
 
         if !canon.starts_with(
             self.repository
@@ -421,79 +365,63 @@ impl Repository {
             .unwrap();
 
         let new_stage = if relative == "" {
-            self.store.insert(Object::Tree(vec![]), options)?
+            self.store.insert(Object::Tree(vec![]))?
         } else {
             match self.update_stage(
                 relative.components().peekable(),
                 relative,
                 None,
                 self.info.stage(),
-                options,
             )? {
                 Some(stage) => stage,
-                None => self.store.insert(Object::Tree(vec![]), options)?,
+                None => self.store.insert(Object::Tree(vec![]))?,
             }
         };
 
-        verbose!(options, "Recomputed stage.");
+        trace!("Recomputed stage.");
 
         if self.info.stage() == new_stage {
-            verbose!(options, "New stage is equal to old stage.")
+            trace!("New stage is equal to old stage.")
         } else {
             self.info.set_stage(new_stage);
         }
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::sub(self, ...) done");
-
         Ok(())
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     fn update_stage(
         &mut self,
         mut components: Peekable<Components>,
         path: impl AsRef<Path>,
         obj: Option<Hash>,
         tree: Hash,
-        options: &Cli,
     ) -> Result<Option<Hash>, EvsError> {
         let next = components.next().unwrap();
 
-        let path = path.as_ref();
-
-        trace!(
-            options,
-            "Repository::update_stage(self, {:?}..., {}, \"{}\")",
-            AsRef::<Path>::as_ref(&next),
-            obj.is_some(),
+        debug!(
+            "Repository::update_stage(self, {:?}, {:?}..., {}, {})",
+            path.as_ref(),
+            next,
+            obj.map(|_| "inserting").unwrap_or("deleting"),
             HashDisplay(&tree)
         );
 
-        let drop = DropAction(|| {
-            trace!(options, "Repository::update_stage(self, ...) error");
-        });
+        let path = path.as_ref();
 
         let next_bytes = AsRef::<Path>::as_ref(&next).as_os_str().as_encoded_bytes();
 
-        let mut items = match self
-            .store
-            .lookup(&format!("{}", HashDisplay(&tree)), options)
-        {
+        let mut items = match self.store.lookup(&format!("{}", HashDisplay(&tree))) {
             Ok((_, Object::Tree(items))) => items,
             Ok((hash, _)) => {
-                verbose!(
-                    options,
-                    "Replacing object \"{}\" with new tree!",
-                    HashDisplay(&hash)
-                );
+                trace!("Replacing object \"{}\" with new tree.", HashDisplay(&hash));
 
                 vec![]
             }
             Err(e) => return Err(e),
         };
 
-        verbose!(options, "Obtained {} tree item(s).", items.len());
+        trace!("Obtained {} tree item(s).", items.len());
 
         let hash = if components.peek().is_none() {
             obj
@@ -504,18 +432,15 @@ impl Repository {
                     if obj.is_none() {
                         return Err(EvsError::PathNotInStage(path.to_path_buf()));
                     } else {
-                        self.store.insert(Object::Tree(vec![]), options)?
+                        self.store.insert(Object::Tree(vec![]))?
                     }
                 }
             };
 
-            self.update_stage(components, path, obj, next, options)?
+            self.update_stage(components, path, obj, next)?
         };
 
-        verbose!(
-            options,
-            "Obtained hash or lack thereof of later component(s)."
-        );
+        trace!("Obtained hash or lack thereof of later component(s).");
 
         let hash = if let Some(obj) = hash {
             if let Some(index) = items
@@ -524,15 +449,15 @@ impl Repository {
                 .find_map(|(i, e)| (e.name == next_bytes).then_some(i))
             {
                 if items[index].content == obj {
-                    verbose!(options, "Object unchanged.");
+                    trace!("Object unchanged.");
 
                     Some(tree)
                 } else {
                     items[index].content = obj;
 
-                    verbose!(options, "Object changed, adding new tree to store...");
+                    trace!("Object changed, adding new tree to store...");
 
-                    Some(self.store.insert(Object::Tree(items), options)?)
+                    Some(self.store.insert(Object::Tree(items))?)
                 }
             } else {
                 items.push(TreeEntry {
@@ -540,9 +465,9 @@ impl Repository {
                     content: obj,
                 });
 
-                verbose!(options, "Tree changed, adding tree to store...");
+                trace!("Tree changed, adding tree to store...");
 
-                Some(self.store.insert(Object::Tree(items), options)?)
+                Some(self.store.insert(Object::Tree(items))?)
             }
         } else {
             if let Some(index) = items
@@ -552,59 +477,49 @@ impl Repository {
             {
                 items.remove(index);
 
-                verbose!(options, "Deleted object.");
+                trace!("Deleted object.");
 
                 if items.len() == 0 {
-                    verbose!(options, "Empty tree pruned.");
+                    trace!("Empty tree pruned.");
 
                     None
                 } else {
-                    verbose!(options, "Tree changed, adding tree to store...");
+                    trace!("Tree changed, adding tree to store...");
 
-                    Some(self.store.insert(Object::Tree(items), options)?)
+                    Some(self.store.insert(Object::Tree(items))?)
                 }
             } else {
                 return Err(EvsError::PathNotInStage(path.to_path_buf()));
             }
         };
 
-        verbose!(options, "Obtained hash or lack thereof of this component.");
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::update_stage(self, ...) done");
+        trace!("Obtained hash or lack thereof of this component.");
 
         Ok(hash)
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     fn hash_dir(
         &self,
         path: &PathBuf,
         ignores: impl AsRef<[Pattern]>,
         overrides: &HashSet<PathBuf>,
-        options: &Cli,
     ) -> Result<Hash, EvsError> {
-        trace!(
-            options,
-            "Repository::hash_dir(self, {:?}, {:?})",
+        debug!(
+            "Repository::hash_dir(self, {:?}, {} ignores, {:?})",
             path,
-            ignores.as_ref()
+            ignores.as_ref().len(),
+            overrides
         );
-
-        verbose!(options, "CHANGE");
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::hash_dir(self, ...) error");
-        });
 
         let ignores = ignores.as_ref();
 
         let res = if !path.is_dir() {
             let content = fs::read(path).map_err(|e| (e, path.to_owned()))?;
 
-            verbose!(options, "Read blob, inserting...");
+            trace!("Read blob, inserting...");
 
-            self.store.insert(Object::Blob(content), options)?
+            self.store.insert(Object::Blob(content))?
         } else {
             let mut items = vec![];
 
@@ -624,14 +539,14 @@ impl Repository {
                     .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
                     && !overrides.iter().any(|o| o.starts_with(relative))
                 {
-                    verbose!(options, "Filtered child {:?}.", name);
+                    trace!("Filtered child {:?}.", name);
 
                     continue;
                 }
 
-                let hash = self.hash_dir(&next, ignores, overrides, options)?;
+                let hash = self.hash_dir(&next, ignores, overrides)?;
 
-                verbose!(options, "Hashed child {:?}.", name);
+                trace!("Hashed child {:?}.", name);
 
                 items.push(TreeEntry {
                     name: name_bytes,
@@ -639,88 +554,61 @@ impl Repository {
                 });
             }
 
-            verbose!(options, "Inserting resulting tree...");
+            trace!("Inserting resulting tree...");
 
-            self.store.insert(Object::Tree(items), options)?
+            self.store.insert(Object::Tree(items))?
         };
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::hash_dir(self, ...) done");
 
         Ok(res)
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn commit(
         &mut self,
         message: String,
         name: String,
         email: String,
         time: SystemTime,
-        options: &Cli,
+        _options: &Cli,
     ) -> Result<Hash, EvsError> {
-        trace!(
-            options,
-            "Repository::commit(self, <msg of len {}>, {}, {}, {:?})",
-            message.len(),
+        debug!(
+            "Repository::commit(self, \"{}\", {}, {}, {:?})",
+            message.as_bytes().escape_ascii(),
             name,
             email,
             time
         );
 
-        let drop = DropAction(|| {
-            trace!(options, "Repository::commit(self, ...) error");
-        });
+        let commit = self.store.insert(Object::Commit(Commit {
+            parent: self.info.head(),
+            name,
+            email,
+            tree: self.info.stage(),
+            msg: message,
+            date: time,
+        }))?;
 
-        let commit = self.store.insert(
-            Object::Commit(Commit {
-                parent: self.info.head(),
-                name,
-                email,
-                tree: self.info.stage(),
-                msg: message,
-                date: time,
-            }),
-            options,
-        )?;
-
-        verbose!(options, "Created and inserted commit object.");
+        trace!("Created and inserted commit object.");
 
         self.info.set_head(commit);
 
-        verbose!(options, "Moved head to \"{}\".", HashDisplay(&commit));
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::commit(self, ...) done");
+        trace!("Moved head to \"{}\".", HashDisplay(&commit));
 
         Ok(commit)
     }
 
-    pub fn lookup(
-        &self,
-        r#ref: impl AsRef<str>,
-        options: &Cli,
-    ) -> Result<(Hash, Object), EvsError> {
-        trace!(options, "Repository::lookup(self, \"{}\")", r#ref.as_ref());
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn lookup(&self, r#ref: impl AsRef<str>) -> Result<(Hash, Object), EvsError> {
+        debug!("Repository::lookup(self, \"{}\")", r#ref.as_ref());
 
-        let drop = DropAction(|| {
-            trace!(options, "Repository::lookup(self, ...) error");
-        });
+        let resolved = self.resolve(r#ref)?;
 
-        let resolved = self.resolve(r#ref, options)?;
+        trace!("Resolved to \"{}\".", resolved);
 
-        verbose!(options, "Resolved to \"{}\".", resolved);
-
-        let result = self.store.lookup(resolved.as_str(), options)?;
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::lookup(self, ...) done");
-
-        Ok(result)
+        self.store.lookup(resolved.as_str())
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn log(
         &self,
         r#ref: impl AsRef<str>,
@@ -728,11 +616,12 @@ impl Repository {
         oneline: bool,
         options: &Cli,
     ) -> Result<(), EvsError> {
-        trace!(options, "Repository::log(self, \"{}\")", r#ref.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::log(self, ...) error");
-        });
+        debug!(
+            "Repository::log(self, \"{}\", {}, {})",
+            r#ref.as_ref(),
+            limit,
+            oneline
+        );
 
         let print_color = get_color(options);
 
@@ -740,65 +629,56 @@ impl Repository {
         let info_color = if print_color { INFO_COLOR } else { "" };
         let none_color = if print_color { NONE_COLOR } else { "" };
 
-        let mut resolved = self.resolve(r#ref, options)?;
+        let mut resolved = self.resolve(r#ref)?;
 
-        verbose!(options, "Resolved to \"{}\".", resolved);
+        trace!("Resolved to \"{}\".", resolved);
 
-        'broken: {
-            for _ in 0..limit {
-                let (hash, commit) = self.store.lookup(&resolved, options)?;
+        for _ in 0..limit {
+            let (hash, commit) = self.store.lookup(&resolved)?;
 
-                match commit {
-                    Object::Null => break 'broken,
-                    Object::Commit(Commit {
-                        parent, ref msg, ..
-                    }) => {
-                        if oneline {
-                            println!(
-                                "{}{}{}: {}{}{}",
-                                info_color,
-                                HashDisplay(&hash),
-                                none_color,
-                                mod_color,
-                                msg.lines().next().unwrap_or(""),
-                                none_color
-                            );
-                        } else {
-                            println!(
-                                "{}{}{}:\n{}{}{}",
-                                info_color,
-                                HashDisplay(&hash),
-                                none_color,
-                                mod_color,
-                                commit,
-                                none_color
-                            );
-                        }
-
-                        resolved = format!("{}", HashDisplay(&parent));
+            match commit {
+                Object::Null => return Ok(()),
+                Object::Commit(Commit {
+                    parent, ref msg, ..
+                }) => {
+                    if oneline {
+                        println!(
+                            "{}{}{}: {}{}{}",
+                            info_color,
+                            HashDisplay(&hash),
+                            none_color,
+                            mod_color,
+                            msg.lines().next().unwrap_or(""),
+                            none_color
+                        );
+                    } else {
+                        println!(
+                            "{}{}{}:\n{}{}{}",
+                            info_color,
+                            HashDisplay(&hash),
+                            none_color,
+                            mod_color,
+                            commit,
+                            none_color
+                        );
                     }
-                    _ => return Err(EvsError::NotACommit(hash)),
-                }
 
-                verbose!(options, "Continuing with \"{}\"", resolved);
+                    resolved = format!("{}", HashDisplay(&parent));
+                }
+                _ => return Err(EvsError::NotACommit(hash)),
             }
 
-            println!("{}...{}", info_color, none_color);
+            trace!("Continuing with \"{}\"", resolved);
         }
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::log(self, ...) done");
+        println!("{}...{}", info_color, none_color);
 
         Ok(())
     }
 
-    pub fn resolve(&self, r#ref: impl AsRef<str>, options: &Cli) -> Result<String, EvsError> {
-        trace!(options, "Repository::resolve(self, \"{}\")", r#ref.as_ref());
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::resolve(...) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn resolve(&self, r#ref: impl AsRef<str>) -> Result<String, EvsError> {
+        debug!("Repository::resolve(self, \"{}\")", r#ref.as_ref());
 
         let (first, back_count) = r#ref
             .as_ref()
@@ -814,12 +694,12 @@ impl Repository {
             first => first.to_owned(),
         };
 
-        verbose!(options, "Starting at \"{}\".", first);
+        trace!("Starting at \"{}\".", first);
 
         let mut resolved = first;
 
         for _ in 0..back_count {
-            let (hash, commit) = self.store.lookup(resolved.as_str(), options)?;
+            let (hash, commit) = self.store.lookup(resolved.as_str())?;
 
             resolved = match commit {
                 Object::Commit(Commit { parent, .. }) => format!("{}", HashDisplay(&parent)),
@@ -827,24 +707,15 @@ impl Repository {
                 _ => return Err(EvsError::NotACommit(hash)),
             };
 
-            verbose!(options, "Gone back to \"{}\".", resolved)
+            trace!("Gone back to \"{}\".", resolved)
         }
 
-        let resolved = self.store.resolve_rest(resolved, options)?;
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::resolve(self, ...) done");
-
-        Ok(resolved)
+        self.store.resolve_rest(resolved)
     }
 
-    pub fn gc(&self, options: &Cli) -> Result<(), EvsError> {
-        trace!(options, "Repository::gc(self)");
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::gc(self) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn gc(&self, _options: &Cli) -> Result<(), EvsError> {
+        debug!("Repository::gc(self)");
 
         let mut dependencies = None;
 
@@ -852,13 +723,11 @@ impl Repository {
             HashSet::new(),
             &[self.info.head(), self.info.stage()],
             Some(&mut dependencies),
-            options,
         )?;
 
         let dependencies = dependencies.as_mut().unwrap();
 
-        verbose!(
-            options,
+        trace!(
             "Checked store and obtained {} dependencies.",
             dependencies.len()
         );
@@ -878,20 +747,16 @@ impl Repository {
 
             let hash_display = format!("{}", HashDisplay(&k));
 
-            verbose!(options, "Adding \"{}\" to the deletion list.", hash_display);
+            trace!("Adding \"{}\" to the deletion list.", hash_display);
 
-            match self.store.lookup(&hash_display, options)?.1 {
+            match self.store.lookup(&hash_display)?.1 {
                 Object::Null => (),
                 Object::Blob(_) => {
                     blob_count += 1;
                 }
                 Object::Tree(items) => {
                     for item in items {
-                        verbose!(
-                            options,
-                            "Decrementing rc for \"{}\".",
-                            HashDisplay(&item.content)
-                        );
+                        trace!("Decrementing rc for \"{}\".", HashDisplay(&item.content));
 
                         dependencies.insert(
                             item.content,
@@ -902,22 +767,14 @@ impl Repository {
                     tree_count += 1;
                 }
                 Object::Commit(commit) => {
-                    verbose!(
-                        options,
-                        "Decrementing rc for \"{}\".",
-                        HashDisplay(&commit.tree)
-                    );
+                    trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.tree));
 
                     dependencies.insert(
                         commit.tree,
                         dependencies.get(&commit.tree).unwrap_or(&1) - 1,
                     );
 
-                    verbose!(
-                        options,
-                        "Decrementing rc for \"{}\".",
-                        HashDisplay(&commit.parent)
-                    );
+                    trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.parent));
 
                     dependencies.insert(
                         commit.parent,
@@ -930,7 +787,7 @@ impl Repository {
         }
 
         if deletion_list.len() != 0 {
-            none!(
+            println!(
                 "This will delete {} objects: ({} commits, {} trees, {} blobs)",
                 deletion_list.len(),
                 commit_count,
@@ -938,114 +795,84 @@ impl Repository {
                 blob_count
             );
 
-            if confirmation("Are you sure?", true, options)? {
-                log!(options, "Deleting {} objects...", deletion_list.len());
+            if confirmation("Are you sure?", true)? {
+                warn!("Deleting {} objects...", deletion_list.len());
 
                 for item in deletion_list {
-                    verbose!(options, "Deleting {}", HashDisplay(&item));
+                    trace!("Deleting {}", HashDisplay(&item));
 
-                    self.store.remove(item, options)?;
+                    self.store.remove(item)?;
                 }
             }
         }
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::gc(self) done");
-
         Ok(())
     }
 
-    pub fn get_tree(&self, commit: Hash, options: &Cli) -> Result<Hash, EvsError> {
-        trace!(
-            options,
-            "Repository::get_tree(self, \"{}\")",
-            HashDisplay(&commit)
-        );
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn get_tree(&self, commit: Hash) -> Result<Hash, EvsError> {
+        debug!("Repository::get_tree(self, \"{}\")", HashDisplay(&commit));
 
-        let drop = DropAction(|| {
-            trace!(options, "Repository::get_tree(self, ...) error");
-        });
+        let (hash, commit) = self.store.lookup(&format!("{}", HashDisplay(&commit)))?;
 
-        let (hash, commit) = self
-            .store
-            .lookup(&format!("{}", HashDisplay(&commit)), options)?;
-
-        verbose!(options, "Found referenced object.");
+        trace!("Found referenced object.");
 
         let commit = match commit {
             Object::Commit(commit) => commit,
             _ => return Err(EvsError::NotACommit(hash)),
         };
 
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::get_tree(self, ...) done");
-
         Ok(commit.tree)
     }
 
-    pub fn get_ignores(&self, options: &Cli) -> Result<Vec<Pattern>, EvsError> {
-        trace!(options, "Repository::get_ignores(self)");
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::get_ignores(self) error");
-        });
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn get_ignores(&self, _options: &Cli) -> Result<Vec<Pattern>, EvsError> {
+        debug!("Repository::get_ignores(self)");
 
         let ignores_file = self.workspace.join(".evsignore");
 
         let content = if ignores_file.exists() {
-            verbose!(options, "Ignores file exists, trying to read...");
+            trace!("Ignores file exists, trying to read...");
 
             fs::read_to_string(&ignores_file).map_err(|e| (e, ignores_file))?
         } else {
-            verbose!(options, "Missing ignores file substituted with \"\".");
+            trace!("Missing ignores file substituted with \"\".");
 
             String::new()
         };
 
-        verbose!(options, "Read ignores file successfully.");
+        trace!("Read ignores file successfully.");
 
-        let result = content
+        content
             .lines()
             .map(str::trim)
             .filter(|l| l.len() != 0)
             .chain(once(".evs"))
             .map(Pattern::new)
-            .collect::<Result<_, _>>()?;
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::get_ignores(self) ok");
-
-        Ok(result)
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
     }
 
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn status(&self, options: &Cli) -> Result<(), EvsError> {
-        trace!(options, "Repository::status(self)");
-
-        let drop = DropAction(|| {
-            trace!(options, "Repository::status(self) error");
-        });
+        debug!("Repository::status(self)");
 
         let (store_count, store_size) = self.store.status()?;
 
-        verbose!(
-            options,
+        trace!(
             "Store reported {} objects with a collective {} bytes.",
-            store_count,
-            store_size
+            store_count, store_size
         );
 
         let (repo_head, repo_stage) = (self.info.head(), self.info.stage());
 
-        let commit_diffside = DiffSide::Tree(self.get_tree(repo_head, options)?);
+        let commit_diffside = DiffSide::Tree(self.get_tree(repo_head)?);
 
         let stage_diffside = DiffSide::Tree(repo_stage);
 
         let local_diffside = DiffSide::Local(self.workspace.clone());
 
-        verbose!(options, "Prepared diffsides.");
+        trace!("Prepared diffsides.");
 
         let ignores = self.get_ignores(options)?;
 
@@ -1053,34 +880,13 @@ impl Repository {
 
         let empty_set = HashSet::new();
 
-        let cds = commit_diffside.read(
-            "",
-            &self.store,
-            &global_filter,
-            &ignores,
-            &empty_set,
-            options,
-        )?;
+        let cds = commit_diffside.read("", &self.store, &global_filter, &ignores, &empty_set)?;
 
-        let sds = stage_diffside.read(
-            "",
-            &self.store,
-            &global_filter,
-            &ignores,
-            &empty_set,
-            options,
-        )?;
+        let sds = stage_diffside.read("", &self.store, &global_filter, &ignores, &empty_set)?;
 
-        let lds =
-            local_diffside.read("", &self.store, &global_filter, &ignores, &sds.0, options)?;
+        let lds = local_diffside.read("", &self.store, &global_filter, &ignores, &sds.0)?;
 
-        verbose!(
-            options,
-            "Read diffsides: {:?} -> {:?} -> {:?}.",
-            cds.0,
-            sds.0,
-            lds.0
-        );
+        trace!("Read diffsides: {:?} -> {:?} -> {:?}.", cds.0, sds.0, lds.0);
 
         let (stage_added, stage_modified, stage_removed) = (
             sds.0.difference(&cds.0).collect(),
@@ -1091,7 +897,7 @@ impl Repository {
             cds.0.difference(&sds.0).collect(),
         );
 
-        verbose!(options, "Generated stage diff.");
+        trace!("Generated stage diff.");
 
         let (local_added, local_modified, local_removed) = (
             lds.0.difference(&sds.0).collect(),
@@ -1102,7 +908,7 @@ impl Repository {
             sds.0.difference(&lds.0).collect(),
         );
 
-        verbose!(options, "Generated local diff.");
+        trace!("Generated local diff.");
 
         self.print_info(
             store_count,
@@ -1117,10 +923,6 @@ impl Repository {
             local_removed,
             get_color(options),
         );
-
-        let _ = ManuallyDrop::new(drop);
-
-        trace!(options, "Repository::status(self) ok");
 
         Ok(())
     }
@@ -1203,7 +1005,7 @@ impl Drop for Repository {
         }();
 
         if let Err(err) = r {
-            none!("Writing back Repository Info failed: {}", err);
+            error!("Writing back Repository Info failed: {}", err);
         }
     }
 }
