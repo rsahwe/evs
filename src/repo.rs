@@ -815,12 +815,11 @@ impl Repository {
 
         trace!("Found referenced object.");
 
-        let commit = match commit {
-            Object::Commit(commit) => commit,
+        Ok(match commit {
+            Object::Null => self.store.insert(Object::Tree(vec![]))?,
+            Object::Commit(commit) => commit.tree,
             _ => return Err(EvsError::NotACommit(hash)),
-        };
-
-        Ok(commit.tree)
+        })
     }
 
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
@@ -986,6 +985,36 @@ impl Repository {
         print!("{}", none_color);
 
         let _ = stdout().flush();
+    }
+
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn show(&self, r#ref: impl AsRef<str>, options: &Cli) -> Result<(), EvsError> {
+        debug!("Repository::show(self, \"{}\")", r#ref.as_ref());
+
+        let (hash, commit) = self.lookup(r#ref)?;
+
+        trace!("Found commit \"{}\".", HashDisplay(&hash));
+
+        let commit = match commit {
+            Object::Null => return Ok(()),
+            Object::Commit(commit) => commit,
+            _ => return Err(EvsError::NotACommit(hash)),
+        };
+
+        let rhs = DiffSide::Tree(commit.tree);
+
+        let lhs = DiffSide::Tree(self.get_tree(commit.parent)?);
+
+        trace!("Diffing...");
+
+        DiffSide::diff_with(
+            lhs,
+            rhs,
+            &self.store,
+            &[AsRef::<Path>::as_ref("").to_path_buf()],
+            &[],
+            options,
+        )
     }
 }
 

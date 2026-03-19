@@ -84,6 +84,12 @@ evs diff --staged first_file.txt second_file.rs
 evs status
 ```
 
+### To show the changes of a specific commit:
+
+```bash
+evs show HEAD
+```
+
 ## TODO:
 
 - [x] `evs init`
@@ -103,6 +109,7 @@ evs status
 - [x] Globbing in `.evsignore`
 - [x] Better logging (possibly tracing)
 - [x] Make confirmation a macro
+- [x] `evs show`
 - [ ] `evs checkout`
 - [ ] Branch tools for evs
 - [ ] `evs clone`
