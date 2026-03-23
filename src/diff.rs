@@ -5,8 +5,8 @@ use std::{
     fmt::Write as FmtWrite,
     fs,
     io::{BufRead, Write as IoWrite, stdout},
-    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use glob::Pattern;
@@ -116,7 +116,9 @@ impl DiffSide {
                 };
 
                 for entry in tree {
-                    let path = origin.as_ref().join(OsString::from_vec(entry.name));
+                    let path = origin.as_ref().join(match OsString::from_str(&entry.name) {
+                        Ok(str) => str,
+                    });
 
                     if !filter
                         .iter()

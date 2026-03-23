@@ -7,6 +7,7 @@ use std::{
     num::ParseIntError,
     ops::Deref,
     path::PathBuf,
+    str::Utf8Error,
 };
 
 use glob::PatternError;
@@ -30,6 +31,7 @@ pub enum EvsError {
     NotATree(Hash),
     NoPreviousCommit,
     PatternError(PatternError),
+    PathError(Utf8Error, Vec<u8>),
 }
 
 impl Display for EvsError {
@@ -66,6 +68,9 @@ impl Display for EvsError {
             }
             EvsError::NoPreviousCommit => write!(f, "NULL object does not have a previous commit"),
             EvsError::PatternError(err) => write!(f, "{}", err),
+            EvsError::PathError(e, bts) => {
+                write!(f, "Path \"{}\" is not valid: {}", bts.escape_ascii(), e)
+            }
         }
     }
 }

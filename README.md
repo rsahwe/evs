@@ -110,6 +110,7 @@ evs show HEAD
 - [x] Better logging (possibly tracing)
 - [x] Make confirmation a macro
 - [x] `evs show`
+- [x] Make it cross platform by making paths be utf8 only
 - [ ] `evs checkout`
 - [ ] Branch tools for evs
 - [ ] `evs clone`

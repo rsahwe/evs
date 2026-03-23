@@ -7,7 +7,7 @@ use crate::store::{Hash, HashDisplay};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TreeEntry {
-    pub name: Vec<u8>,
+    pub name: String,
     // Maybe mode?
     pub content: Hash,
 }
@@ -42,12 +42,7 @@ impl Display for Object {
                     write!(f, "Tree:")?;
 
                     for item in items {
-                        write!(
-                            f,
-                            "\n- \"{}\" {}",
-                            HashDisplay(&item.content),
-                            item.name.deref().escape_ascii()
-                        )?;
+                        write!(f, "\n- \"{}\" {}", HashDisplay(&item.content), item.name)?;
                     }
 
                     Ok(())

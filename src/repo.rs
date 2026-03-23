@@ -424,7 +424,7 @@ impl Repository {
         let hash = if components.peek().is_none() {
             obj
         } else {
-            let next = match items.iter().find(|e| e.name == next_bytes) {
+            let next = match items.iter().find(|e| e.name.as_bytes() == next_bytes) {
                 Some(next) => next.content,
                 None => {
                     if obj.is_none() {
@@ -444,7 +444,7 @@ impl Repository {
             if let Some(index) = items
                 .iter()
                 .enumerate()
-                .find_map(|(i, e)| (e.name == next_bytes).then_some(i))
+                .find_map(|(i, e)| (e.name.as_bytes() == next_bytes).then_some(i))
             {
                 if items[index].content == obj {
                     trace!("Object unchanged.");
@@ -459,7 +459,8 @@ impl Repository {
                 }
             } else {
                 items.push(TreeEntry {
-                    name: next_bytes.to_owned(),
+                    name: String::from_utf8(next_bytes.to_owned())
+                        .map_err(|e| EvsError::PathError(e.utf8_error(), e.into_bytes()))?,
                     content: obj,
                 });
 
@@ -471,7 +472,7 @@ impl Repository {
             if let Some(index) = items
                 .iter()
                 .enumerate()
-                .find_map(|(i, e)| (e.name == next_bytes).then_some(i))
+                .find_map(|(i, e)| (e.name.as_bytes() == next_bytes).then_some(i))
             {
                 items.remove(index);
 
@@ -547,7 +548,8 @@ impl Repository {
                 trace!("Hashed child {:?}.", name);
 
                 items.push(TreeEntry {
-                    name: name_bytes,
+                    name: String::from_utf8(name_bytes)
+                        .map_err(|e| EvsError::PathError(e.utf8_error(), e.into_bytes()))?,
                     content: hash,
                 });
             }
