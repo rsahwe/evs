@@ -1018,6 +1018,151 @@ impl Repository {
             options,
         )
     }
+
+    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    pub fn checkout(
+        &mut self,
+        r#ref: impl AsRef<str>,
+        force: bool,
+        options: &Cli,
+    ) -> Result<Hash, EvsError> {
+        debug!("Repository::checkout(self, \"{}\")", r#ref.as_ref());
+
+        let (hash, _) = self.lookup(r#ref)?;
+
+        trace!("Found commit \"{}\".", HashDisplay(&hash));
+
+        let dest_tree = self.get_tree(hash)?;
+
+        trace!("Destination tree \"{}\".", HashDisplay(&dest_tree));
+
+        let mut src_tree = self.get_tree(self.info.head())?;
+
+        trace!("Source tree \"{}\".", HashDisplay(&src_tree));
+
+        if src_tree != self.info.stage() {
+            if force
+                || confirmation!(
+                    false,
+                    "There are uncommitted changes, do you want to discard them?"
+                )?
+            {
+                warn!("Discarding current stage...");
+
+                src_tree = self.info.stage();
+            } else {
+                return Err(EvsError::UncommittedChanges);
+            }
+        }
+
+        let dd = DiffSide::Tree(dest_tree);
+
+        let ds = DiffSide::Tree(src_tree);
+
+        let dl = DiffSide::Local(self.workspace.clone());
+
+        trace!("Prepared diffsides.");
+
+        let global_filter = [AsRef::<Path>::as_ref("").to_path_buf()];
+
+        let empty_set = HashSet::new();
+
+        let ignores = self.get_ignores(options)?;
+
+        let ds = ds.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+
+        let dl = dl.read("", &self.store, &global_filter, &ignores, &ds.0)?;
+
+        let dd = dd.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+
+        trace!("Read diffsides.");
+
+        if ds.0.difference(&dl.0).count() > 0
+            || dl.0.difference(&ds.0).any(|k| dd.0.contains(k))
+            || ds
+                .0
+                .intersection(&dl.0)
+                .any(|k| ds.1.get(k).unwrap() != dl.1.get(k).unwrap())
+        {
+            if force
+                || confirmation!(
+                    false,
+                    "There are unstaged changes, do you want to discard them?"
+                )?
+            {
+                warn!("Discarding local changes...");
+            } else {
+                return Err(EvsError::UncommittedChanges);
+            }
+        }
+
+        self.info.set_head(hash);
+
+        //TODO: SET BRANCH OR SOMETHING
+
+        self.info.set_stage(dest_tree);
+
+        trace!("Modified repository info.");
+
+        for file in ds.0.difference(&dd.0) {
+            let file = self.workspace.join(file);
+
+            trace!("Deleting file {:?}...", file);
+
+            fs::remove_file(&file).map_err(|e| (e, file.clone()))?;
+
+            for ancestor in file.ancestors().skip(1) {
+                if let Ok(dir) = ancestor.read_dir()
+                    && dir.count() == 0
+                {
+                    trace!("Pruning empty dir {:?}...", ancestor);
+
+                    if fs::remove_dir(ancestor).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        trace!("Deleted files...");
+
+        for file in dd.0.difference(&ds.0) {
+            let content = dd.1.get(file).unwrap();
+
+            let file = self.workspace.join(file);
+
+            // workspace is parent
+            let parent = file.parent().unwrap();
+
+            trace!("Creating dir {:?}...", parent);
+
+            fs::create_dir_all(&parent).map_err(|e| (e, file.clone()))?;
+
+            trace!("Creating file {:?}...", file);
+
+            fs::write(&file, content).map_err(|e| (e, file))?;
+        }
+
+        trace!("Created new files...");
+
+        for (file, _, content) in
+            ds.0.intersection(&dd.0)
+                .map(|k| (k, ds.1.get(k).unwrap(), dd.1.get(k).unwrap()))
+                .filter(|(_, lhs, rhs)| lhs != rhs)
+        {
+            let file = self.workspace.join(file);
+
+            trace!("Modifying file {:?}...", file);
+
+            fs::write(&file, content).map_err(|e| (e, file))?;
+        }
+
+        trace!("Modified files...");
+
+        trace!("Checkout complete.");
+
+        Ok(hash)
+    }
 }
 
 impl Drop for Repository {
@@ -1054,8 +1199,8 @@ impl RepositoryInfo {
     }
 
     pub fn set_head(&mut self, new_head: Hash) {
+        self.modified = self.head != new_head;
         self.head = new_head;
-        self.modified = true;
     }
 
     pub fn stage(&self) -> Hash {
@@ -1063,7 +1208,7 @@ impl RepositoryInfo {
     }
 
     pub fn set_stage(&mut self, new_stage: Hash) {
+        self.modified = self.stage != new_stage;
         self.stage = new_stage;
-        self.modified = true;
     }
 }

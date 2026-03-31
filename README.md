@@ -111,7 +111,9 @@ evs show HEAD
 - [x] Make confirmation a macro
 - [x] `evs show`
 - [x] Make it cross platform by making paths be utf8 only
-- [ ] `evs checkout`
+- [x] `evs checkout`
+- [ ] Use clippy
+- [ ] Custom partial canonicalize
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs

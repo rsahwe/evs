@@ -32,6 +32,7 @@ pub enum EvsError {
     NoPreviousCommit,
     PatternError(PatternError),
     PathError(Utf8Error, Vec<u8>),
+    UncommittedChanges,
 }
 
 impl Display for EvsError {
@@ -71,6 +72,7 @@ impl Display for EvsError {
             EvsError::PathError(e, bts) => {
                 write!(f, "Path \"{}\" is not valid: {}", bts.escape_ascii(), e)
             }
+            EvsError::UncommittedChanges => write!(f, "There are uncommitted changes"),
         }
     }
 }
