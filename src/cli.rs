@@ -156,11 +156,13 @@ pub enum Commands {
         r#ref: String,
     },
     #[doc(hidden)]
+    #[clap(hide(true))]
     Mangen {
         #[arg(value_hint(ValueHint::DirPath))]
         dir: PathBuf,
     },
     #[doc(hidden)]
+    #[clap(hide(true))]
     Completion,
 }
 
