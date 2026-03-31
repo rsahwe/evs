@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive", "env"] }
-clap_complete = "4.5.65"
+clap_complete = { version = "4.5.65", features = ["unstable-dynamic"] }
 clap_mangen = "0.2.31"
 enable-ansi-support = "0.3.1"
 flate2 = "1.1.9"

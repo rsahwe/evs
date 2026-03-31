@@ -1,12 +1,20 @@
 use std::{
     env::var_os,
+    ffi::OsStr,
     fmt::{Arguments, Display},
     io::{BufRead, IsTerminal, Write, stdin, stdout},
+    path::{self, Path},
 };
 
+use clap_complete::CompletionCandidate;
+use glob::glob;
 use tracing::{debug, instrument};
 
-use crate::{cli::Cli, error::EvsError};
+use crate::{
+    cli::{Cli, Commands},
+    error::EvsError,
+    repo::Repository,
+};
 
 #[macro_export]
 macro_rules! confirmation {
@@ -100,4 +108,49 @@ impl Display for SizeDisplay {
             ),
         }
     }
+}
+
+pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+
+    let cli = Cli {
+        verbose: 0,
+        no_color: true,
+        force_color: false,
+        command: Commands::Completion,
+    };
+
+    let Ok(repo) = Repository::find(".", &cli) else {
+        return Vec::new();
+    };
+
+    let Some(store_dir) = repo.store.path().to_str() else {
+        return Vec::new();
+    };
+
+    //TODO: BRANCHES
+
+    let mut result = if "HEAD".starts_with(current) {
+        vec![CompletionCandidate::new("HEAD")]
+    } else {
+        Vec::new()
+    };
+
+    if let Ok(paths) = glob(&format!(
+        "{}{}{}*",
+        store_dir,
+        path::MAIN_SEPARATOR,
+        current
+    )) {
+        result.extend(
+            paths
+                .flatten()
+                .flat_map(|p| p.strip_prefix(store_dir).map(Path::to_path_buf))
+                .map(CompletionCandidate::new),
+        );
+    }
+
+    result
 }

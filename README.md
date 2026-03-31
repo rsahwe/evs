@@ -113,11 +113,13 @@ evs show HEAD
 - [x] Make it cross platform by making paths be utf8 only
 - [x] `evs checkout`
 - [x] Use clippy
+- [x] Shell completions
+- [x] Nix flake
 - [ ] Custom partial canonicalize
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs
 - [ ] Merge tools for evs
 - [ ] Tests
-- [ ] Man pages + shell completion + more documentation
+- [ ] More documentation (+ better man pages?)
 - [ ] ...
