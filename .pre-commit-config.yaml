@@ -4,6 +4,6 @@ repos:
   hooks:
     - id: fmt
       args: ["--check", "--"]
-    - id: cargo-check
+    - id: clippy
     - id: build
     - id: test

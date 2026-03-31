@@ -36,7 +36,7 @@ impl Display for Object {
             Object::Null => write!(f, "Null object :)"),
             Object::Blob(items) => write!(f, "Blob:\n{}", items.deref().escape_ascii()),
             Object::Tree(items) => {
-                if items.len() == 0 {
+                if items.is_empty() {
                     write!(f, "Empty tree :)")
                 } else {
                     write!(f, "Tree:")?;

@@ -41,14 +41,16 @@ pub fn confirmation_impl(prompt: Arguments, default: bool) -> Result<bool, EvsEr
         s if s.eq_ignore_ascii_case("yes") => true,
         s if s.eq_ignore_ascii_case("n") => false,
         s if s.eq_ignore_ascii_case("no") => false,
-        "" | _ => default,
+        _ => default,
     };
 
     Ok(response)
 }
 
 pub fn get_color(options: &Cli) -> bool {
-    !(options.no_color || var_os("NO_COLOR").is_some_and(|v| v != "") || !stdout().is_terminal())
+    !(options.no_color
+        || var_os("NO_COLOR").is_some_and(|v| !v.is_empty())
+        || !stdout().is_terminal())
         || options.force_color
 }
 

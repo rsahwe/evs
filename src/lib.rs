@@ -1,3 +1,5 @@
+#![warn(clippy::all, clippy::cargo)]
+
 pub mod cli;
 pub mod diff;
 pub mod error;

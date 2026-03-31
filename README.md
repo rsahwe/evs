@@ -112,10 +112,12 @@ evs show HEAD
 - [x] `evs show`
 - [x] Make it cross platform by making paths be utf8 only
 - [x] `evs checkout`
-- [ ] Use clippy
+- [x] Use clippy
 - [ ] Custom partial canonicalize
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs
 - [ ] Merge tools for evs
+- [ ] Tests
+- [ ] Man pages + shell completion + more documentation
 - [ ] ...

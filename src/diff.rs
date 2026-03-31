@@ -79,6 +79,7 @@ impl DiffSide {
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn read(
         self,
@@ -333,9 +334,9 @@ impl DiffFormat {
     pub fn binary_to_text(binary: impl AsRef<[u8]>) -> String {
         let mut result = String::new();
 
-        let _ = write!(
+        let _ = writeln!(
             result,
-            "┌────────┬─────────────────────────┬─────────────────────────┐\n"
+            "┌────────┬─────────────────────────┬─────────────────────────┐"
         );
 
         for (addr, line) in binary.as_ref().chunks(16).enumerate() {
@@ -363,12 +364,12 @@ impl DiffFormat {
                 }
             }
 
-            let _ = write!(result, " │\n");
+            let _ = writeln!(result, " │");
         }
 
-        let _ = write!(
+        let _ = writeln!(
             result,
-            "└────────┴─────────────────────────┴─────────────────────────┘\n"
+            "└────────┴─────────────────────────┴─────────────────────────┘"
         );
 
         result
@@ -387,9 +388,8 @@ impl DiffFormat {
 
             let _ = diff.to_writer(&mut result);
 
-            for line in result.as_slice().lines().flatten() {
+            for line in result.as_slice().lines().map_while(Result::ok) {
                 if line.starts_with("+++") || line.starts_with("---") {
-                    ()
                 } else if line.starts_with('@') {
                     let _ = write!(stdout, "{}", INFO_COLOR);
                 } else if line.starts_with('+') {
@@ -398,7 +398,7 @@ impl DiffFormat {
                     let _ = write!(stdout, "{}", SUB_COLOR);
                 }
 
-                let _ = write!(stdout, "{}{}\n", line, NONE_COLOR);
+                let _ = writeln!(stdout, "{}{}", line, NONE_COLOR);
             }
         }
     }

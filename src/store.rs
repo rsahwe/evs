@@ -51,11 +51,8 @@ impl Store {
     pub fn insert(&self, mut obj: Object) -> Result<Hash, EvsError> {
         debug!("Store::insert(self, ...)");
 
-        match &mut obj {
-            Object::Tree(entries) => {
-                entries.sort_by(|a, b| a.name.cmp(&b.name));
-            }
-            _ => (),
+        if let Object::Tree(entries) = &mut obj {
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
         }
 
         let data = rmp_serde::to_vec(&obj).expect("msgpack failed");
@@ -336,7 +333,7 @@ impl Store {
     pub fn remove(&self, path: Hash) -> Result<(), EvsError> {
         debug!("Store::remove(self, \"{}\")", HashDisplay(&path));
 
-        let path = self.path.join(&format!("{}", HashDisplay(&path)));
+        let path = self.path.join(format!("{}", HashDisplay(&path)));
 
         trace!("Deleting {:?}", &path);
 
@@ -415,13 +412,12 @@ impl Store {
         self.path
             .read_dir()
             .map_err(|e| (e, self.path.clone()))?
-            .fold(Ok((0, 0)), |acc, entry| match (acc, entry) {
-                (Ok((count, size)), Ok(entry)) => Ok((
+            .try_fold((0, 0), |(count, size), entry| match entry {
+                Ok(entry) => Ok((
                     count + 1,
                     size + entry.metadata().map_err(|e| (e, entry.path()))?.len() as usize,
                 )),
-                (Err(err), _) => Err(err),
-                (_, Err(err)) => Err((err, self.path.clone()).into()),
+                Err(err) => Err((err, self.path.clone()).into()),
             })
     }
 }

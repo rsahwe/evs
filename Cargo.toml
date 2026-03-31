@@ -2,6 +2,16 @@
 name = "evs"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/rsahwe/evs"
+description = "Ev source control"
+license-file = "LICENSE.md"
+keywords = [
+    "cli",
+    "terminal",
+    "utility",
+    "vcs",
+]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.5.56", features = ["derive", "env"] }

@@ -11,11 +11,7 @@ use tracing::{Level, info, trace};
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitExt};
 
 use crate::{
-    diff::DiffSide,
-    error::EvsError,
-    repo::Repository,
-    store::{Hash, HashDisplay},
-    util::get_color,
+    diff::DiffSide, error::EvsError, repo::Repository, store::HashDisplay, util::get_color,
 };
 
 pub const VERBOSITY_NONE: u8 = 0;
@@ -162,7 +158,7 @@ impl Cli {
                 0 => Level::WARN,
                 1 => Level::INFO,
                 2 => Level::DEBUG,
-                3 | _ => Level::TRACE,
+                _ => Level::TRACE,
             })
             .compact()
             .finish()
@@ -309,7 +305,7 @@ impl Cli {
             Commands::Resolve { r#ref } => {
                 let repo = get_repo!();
 
-                let hash = repo.resolve(&r#ref)?;
+                let hash = repo.resolve(r#ref)?;
 
                 trace!("\"{}\" resolved to \"{}\".", r#ref, hash);
 
@@ -333,7 +329,7 @@ impl Cli {
                     (
                         DiffSide::Tree(
                             from.as_ref()
-                                .map(|f| Ok::<Hash, EvsError>(repo.get_tree(repo.lookup(f)?.0)?))
+                                .map(|f| repo.get_tree(repo.lookup(f)?.0))
                                 .transpose()?
                                 .unwrap_or(repo.info.stage()),
                         ),

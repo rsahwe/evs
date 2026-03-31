@@ -107,7 +107,7 @@ impl Repository {
             .map_err(|e| (e, lockfile_path.clone()))?;
 
         let repo_info =
-            rmp_serde::from_slice(&repo_info).map_err(|e| EvsError::RepositoryInfoCorrupt(e))?;
+            rmp_serde::from_slice(&repo_info).map_err(EvsError::RepositoryInfoCorrupt)?;
 
         trace!("Read repository info successfully.");
 
@@ -240,7 +240,7 @@ impl Repository {
         debug!("Repository::check(self)");
 
         self.store
-            .check(HashSet::new(), &[self.info.head(), self.info.stage()], None)
+            .check(HashSet::new(), [self.info.head(), self.info.stage()], None)
             .map(|_| ())
     }
 
@@ -278,14 +278,12 @@ impl Repository {
             .iter()
             .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
             && !overrides.contains(relative)
+            && (relative.starts_with(".evs")
+                || !confirmation!(false, "{:?} is ignored, add anyway?", relative)?)
         {
-            if relative.starts_with(".evs")
-                || !confirmation!(false, "{:?} is ignored, add anyway?", relative)?
-            {
-                trace!("Filtered path {:?}.", relative);
+            trace!("Filtered path {:?}.", relative);
 
-                return Ok(());
-            }
+            return Ok(());
         }
 
         let hash = if canon.is_dir() {
@@ -478,7 +476,7 @@ impl Repository {
 
                 trace!("Deleted object.");
 
-                if items.len() == 0 {
+                if items.is_empty() {
                     trace!("Empty tree pruned.");
 
                     None
@@ -687,7 +685,7 @@ impl Repository {
 
         let back_count = back_count
             .parse::<usize>()
-            .map_err(|e| EvsError::IntegerParseError(e))?;
+            .map_err(EvsError::IntegerParseError)?;
 
         let first = match first {
             "HEAD" => format!("{}", HashDisplay(&self.info.head())),
@@ -721,7 +719,7 @@ impl Repository {
 
         self.store.check(
             HashSet::new(),
-            &[self.info.head(), self.info.stage()],
+            [self.info.head(), self.info.stage()],
             Some(&mut dependencies),
         )?;
 
@@ -786,7 +784,7 @@ impl Repository {
             }
         }
 
-        if deletion_list.len() != 0 {
+        if !deletion_list.is_empty() {
             println!(
                 "This will delete {} object(s): ({} commit(s), {} tree(s), {} blob(s))",
                 deletion_list.len(),
@@ -845,7 +843,7 @@ impl Repository {
         content
             .lines()
             .map(str::trim)
-            .filter(|l| l.len() != 0)
+            .filter(|l| !l.is_empty())
             .chain(once(".evs"))
             .map(Pattern::new)
             .collect::<Result<_, _>>()
@@ -926,6 +924,7 @@ impl Repository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn print_info(
         &self,
         store_count: usize,
@@ -1136,7 +1135,7 @@ impl Repository {
 
             trace!("Creating dir {:?}...", parent);
 
-            fs::create_dir_all(&parent).map_err(|e| (e, file.clone()))?;
+            fs::create_dir_all(parent).map_err(|e| (e, file.clone()))?;
 
             trace!("Creating file {:?}...", file);
 
