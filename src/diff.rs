@@ -2,11 +2,11 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::OsString,
-    fmt::Write as FmtWrite,
+    fmt::Write as _,
     fs,
-    io::{BufRead, Write as IoWrite, stdout},
+    io::{BufRead as _, Write as _, stdout},
     path::{Path, PathBuf},
-    str::FromStr,
+    str::FromStr as _,
 };
 
 use glob::Pattern;
@@ -28,13 +28,14 @@ pub enum DiffSide {
 }
 
 impl DiffSide {
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn diff_with(
+    pub fn diff_with<F: AsRef<[PathBuf]>, I: AsRef<[Pattern]>>(
         from: Self,
         to: Self,
         store: &Store,
-        files: impl AsRef<[PathBuf]>,
-        ignores: impl AsRef<[Pattern]>,
+        files: F,
+        ignores: I,
         options: &Cli,
     ) -> Result<(), EvsError> {
         debug!(
@@ -45,12 +46,20 @@ impl DiffSide {
             ignores.as_ref().len()
         );
 
+        Self::diff_with_(from, to, store, files.as_ref(), ignores.as_ref(), options)
+    }
+
+    fn diff_with_(
+        from: Self,
+        to: Self,
+        store: &Store,
+        files: &[PathBuf],
+        ignores: &[Pattern],
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         if from == to {
             return Ok(());
         }
-
-        let files = files.as_ref();
-        let ignores = ignores.as_ref();
 
         let lhs = from.read("", store, files, ignores, &HashSet::new())?;
 
@@ -64,12 +73,13 @@ impl DiffSide {
         let insertions = rhs.0.difference(&lhs.0);
         let modifications = lhs.0.intersection(&rhs.0);
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         DiffFormat::print(
-            removals.map(|e| (e.clone(), lhs.1.get(e).unwrap())),
-            insertions.map(|e| (e.clone(), rhs.1.get(e).unwrap())),
+            removals.map(|e| (e.clone(), &lhs.1[e])),
+            insertions.map(|e| (e.clone(), &rhs.1[e])),
             modifications.filter_map(|e| {
-                let lhs = lhs.1.get(e).unwrap();
-                let rhs = rhs.1.get(e).unwrap();
+                let lhs = &lhs.1[e];
+                let rhs = &rhs.1[e];
 
                 (rhs != lhs).then(|| (e.clone(), lhs, rhs))
             }),
@@ -79,14 +89,18 @@ impl DiffSide {
         Ok(())
     }
 
-    #[allow(clippy::type_complexity)]
+    #[inline]
+    #[allow(
+        clippy::type_complexity,
+        reason = "It's not even that complex, I might do something later."
+    )]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn read(
+    pub fn read<O: AsRef<Path>, F: AsRef<[PathBuf]>, I: AsRef<[Pattern]>>(
         self,
-        origin: impl AsRef<Path>,
+        origin: O,
         store: &Store,
-        filter: impl AsRef<[PathBuf]>,
-        ignores: impl AsRef<[Pattern]>,
+        filter: F,
+        ignores: I,
         overrides: &HashSet<PathBuf>,
     ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
         debug!(
@@ -97,11 +111,33 @@ impl DiffSide {
             overrides
         );
 
+        self.read_(
+            origin.as_ref(),
+            store,
+            filter.as_ref(),
+            ignores.as_ref(),
+            overrides,
+        )
+    }
+
+    #[allow(
+        clippy::type_complexity,
+        reason = "It's not even that complex, I might do something later."
+    )]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "It's barely over the limit and it's totally fine."
+    )]
+    fn read_(
+        self,
+        origin: &Path,
+        store: &Store,
+        filter: &[PathBuf],
+        ignores: &[Pattern],
+        overrides: &HashSet<PathBuf>,
+    ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
         let mut sum_set = HashSet::new();
         let mut sum_map = HashMap::new();
-
-        let filter = filter.as_ref();
-        let ignores = ignores.as_ref();
 
         let result = match self {
             DiffSide::Tree(tree) => {
@@ -111,13 +147,12 @@ impl DiffSide {
 
                 trace!("Found tree in store.");
 
-                let tree = match tree {
-                    Object::Tree(tree) => tree,
-                    _ => return Err(EvsError::NotATree(hash)),
+                let Object::Tree(tree) = tree else {
+                    return Err(EvsError::NotATree(hash));
                 };
 
                 for entry in tree {
-                    let path = origin.as_ref().join(match OsString::from_str(&entry.name) {
+                    let path = origin.join(match OsString::from_str(&entry.name) {
                         Ok(str) => str,
                     });
 
@@ -185,7 +220,7 @@ impl DiffSide {
 
                     let entry_name = entry.file_name();
 
-                    let path = origin.as_ref().join(&entry_name);
+                    let path = origin.join(&entry_name);
 
                     if !filter
                         .iter()
@@ -243,11 +278,24 @@ impl DiffSide {
 pub struct DiffFormat;
 
 impl DiffFormat {
+    //TODO: FIX THIS GARBAGE
+    #[inline]
     #[instrument(level = "debug", skip_all)]
-    pub fn print(
-        removals: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>)>,
-        insertions: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>)>,
-        modifications: impl IntoIterator<Item = (impl AsRef<Path>, impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+    pub fn print<
+        RB: AsRef<[u8]>,
+        RP: AsRef<Path>,
+        R: IntoIterator<Item = (RP, RB)>,
+        IB: AsRef<[u8]>,
+        IP: AsRef<Path>,
+        I: IntoIterator<Item = (IP, IB)>,
+        MBL: AsRef<[u8]>,
+        MBR: AsRef<[u8]>,
+        MP: AsRef<Path>,
+        M: IntoIterator<Item = (MP, MBL, MBR)>,
+    >(
+        removals: R,
+        insertions: I,
+        modifications: M,
         options: &Cli,
     ) {
         debug!("DiffFormat::print(...)");
@@ -273,7 +321,7 @@ impl DiffFormat {
                 "/dev/null",
             );
 
-            DiffFormat::write_diff(diff, print_color);
+            DiffFormat::write_diff(&diff, print_color);
         }
 
         for insertion in insertions {
@@ -295,7 +343,7 @@ impl DiffFormat {
                     .as_str(),
             );
 
-            DiffFormat::write_diff(diff, print_color);
+            DiffFormat::write_diff(&diff, print_color);
         }
 
         for modification in modifications {
@@ -327,11 +375,13 @@ impl DiffFormat {
                     .as_str(),
             );
 
-            DiffFormat::write_diff(diff, print_color);
+            DiffFormat::write_diff(&diff, print_color);
         }
     }
 
-    pub fn binary_to_text(binary: impl AsRef<[u8]>) -> String {
+    #[inline]
+    #[must_use]
+    pub fn binary_to_text(binary: &[u8]) -> String {
         let mut result = String::new();
 
         let _ = writeln!(
@@ -339,15 +389,19 @@ impl DiffFormat {
             "┌────────┬─────────────────────────┬─────────────────────────┐"
         );
 
-        for (addr, line) in binary.as_ref().chunks(16).enumerate() {
-            let _ = write!(result, "│{:07x}0│", addr & u32::MAX as usize);
+        for (addr, line) in binary.chunks(16).enumerate() {
+            let _ = write!(
+                result,
+                "│{:07x}0│",
+                addr & usize::try_from(u32::MAX).unwrap()
+            );
 
             for left in line.iter().take(8) {
                 let _ = write!(result, " {:02x}", left);
             }
 
-            if line.len() < 8 {
-                for _ in 0..(8 - line.len()) {
+            if let Some(left) = 8usize.checked_sub(line.len()) {
+                for _ in 0..left {
                     let _ = write!(result, "   ");
                 }
             }
@@ -358,8 +412,8 @@ impl DiffFormat {
                 let _ = write!(result, " {:02x}", right);
             }
 
-            if line.len() < 16 {
-                for _ in 0..((16 - line.len()).min(8)) {
+            if let Some(diff) = 16usize.checked_sub(line.len()) {
+                for _ in 0..diff.min(8) {
                     let _ = write!(result, "   ");
                 }
             }
@@ -375,8 +429,9 @@ impl DiffFormat {
         result
     }
 
-    pub fn write_diff<'a: 'b + 'c, 'b, 'c, 'd>(
-        diff: UnifiedDiff<'a, 'b, 'c, 'd, impl DiffableStr + ?Sized>,
+    #[inline]
+    pub fn write_diff<'a: 'b + 'c, 'b, 'c, 'd, S: DiffableStr + ?Sized>(
+        diff: &UnifiedDiff<'a, 'b, 'c, 'd, S>,
         print_color: bool,
     ) {
         let mut stdout = stdout();
@@ -396,6 +451,8 @@ impl DiffFormat {
                     let _ = write!(stdout, "{}", ADD_COLOR);
                 } else if line.starts_with('-') {
                     let _ = write!(stdout, "{}", SUB_COLOR);
+                } else {
+                    // Doesn't matter
                 }
 
                 let _ = writeln!(stdout, "{}{}", line, NONE_COLOR);

@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     ffi::OsString,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     fs::TryLockError,
     io,
     num::ParseIntError,
@@ -11,6 +11,7 @@ use std::{
 };
 
 use glob::PatternError;
+use rmp_serde::{decode, encode};
 
 use crate::store::{Hash, HashDisplay, PartialHash};
 
@@ -23,7 +24,7 @@ pub enum EvsError {
     RepositoryLocked(TryLockError, PathBuf),
     ObjectNotInStore(String),
     AmbiguousObject(String, OsString),
-    RepositoryInfoCorrupt(rmp_serde::decode::Error),
+    RepositoryInfoCorrupt(decode::Error),
     PathOutsideOfRepo(PathBuf),
     PathNotInStage(PathBuf),
     IntegerParseError(ParseIntError),
@@ -33,10 +34,12 @@ pub enum EvsError {
     PatternError(PatternError),
     PathError(Utf8Error, Vec<u8>),
     UncommittedChanges,
+    EncoderFailed(encode::Error),
 }
 
 impl Display for EvsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             EvsError::IOError(err, pb) => write!(f, "IO Error on {:?}: {}", pb, err),
             EvsError::MissingRepository(pb) => write!(f, "No repository found at`{:?}", pb),
@@ -73,6 +76,7 @@ impl Display for EvsError {
                 write!(f, "Path \"{}\" is not valid: {}", bts.escape_ascii(), e)
             }
             EvsError::UncommittedChanges => write!(f, "There are uncommitted changes"),
+            EvsError::EncoderFailed(err) => unreachable!("The encoder failed: {}", err),
         }
     }
 }
@@ -80,26 +84,37 @@ impl Display for EvsError {
 impl Error for EvsError {}
 
 impl From<(io::Error, PathBuf)> for EvsError {
+    #[inline]
     fn from(value: (io::Error, PathBuf)) -> Self {
         EvsError::IOError(value.0, value.1)
     }
 }
 
 impl From<(TryLockError, PathBuf)> for EvsError {
+    #[inline]
     fn from(value: (TryLockError, PathBuf)) -> Self {
         EvsError::RepositoryLocked(value.0, value.1)
     }
 }
 
-impl From<(rmp_serde::decode::Error, Hash)> for EvsError {
-    fn from(value: (rmp_serde::decode::Error, Hash)) -> Self {
+impl From<(decode::Error, Hash)> for EvsError {
+    #[inline]
+    fn from(value: (decode::Error, Hash)) -> Self {
         EvsError::CorruptStateDetected(CorruptState::InvalidObjectContent(value.1, value.0))
     }
 }
 
 impl From<PatternError> for EvsError {
+    #[inline]
     fn from(value: PatternError) -> Self {
         EvsError::PatternError(value)
+    }
+}
+
+impl From<encode::Error> for EvsError {
+    #[inline]
+    fn from(value: encode::Error) -> Self {
+        EvsError::EncoderFailed(value)
     }
 }
 
@@ -115,12 +130,13 @@ pub enum CorruptState {
     ),
     InvalidCompression(PathBuf, io::Error),
     MissingObjects(Hash, usize),
-    InvalidObjectContent(Hash, rmp_serde::decode::Error),
+    InvalidObjectContent(Hash, decode::Error),
     NonContentInTree(Hash, Hash, &'static str),
 }
 
 impl Display for CorruptState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             CorruptState::MissingPath(pb) => write!(f, "Path {:?} is missing", pb),
             CorruptState::DirectoryIsFile(pb) => write!(f, "Path {:?} should be a directory", pb),

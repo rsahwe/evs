@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, DirBuilder, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write, stdout},
+    io::{self, ErrorKind, Read as _, Seek as _, SeekFrom, Write as _, stdout},
     iter::{Peekable, once},
     path::{Components, Path, PathBuf},
     time::SystemTime,
@@ -31,18 +31,20 @@ pub struct Repository {
 }
 
 impl Repository {
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn open(path: impl AsRef<Path>, _options: &Cli) -> Result<Repository, EvsError> {
+    pub fn open<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
         debug!("Repository::open({:?})", path.as_ref());
 
-        let _ = path
-            .as_ref()
-            .read_dir()
-            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+        Self::open_(path.as_ref(), options)
+    }
+
+    fn open_(path: &Path, _options: &Cli) -> Result<Repository, EvsError> {
+        let _ = path.read_dir().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Workspace exists and is a directory.");
 
-        let repo = path.as_ref().join(".evs");
+        let repo = path.join(".evs");
 
         if !repo.exists() {
             return Err(EvsError::MissingRepository(repo));
@@ -56,7 +58,7 @@ impl Repository {
 
         trace!("Repository exists and is a directory.");
 
-        let repo = repo.canonicalize().expect("repo exists and is a directory");
+        let repo = repo.canonicalize().map_err(|e| (e, repo))?;
 
         trace!("Repository directory was canonicalized.");
 
@@ -102,6 +104,10 @@ impl Repository {
 
         let mut repo_info = vec![];
 
+        #[allow(
+            clippy::verbose_file_reads,
+            reason = "fs::read is not at all equivalent here."
+        )]
         lockfile
             .read_to_end(&mut repo_info)
             .map_err(|e| (e, lockfile_path.clone()))?;
@@ -112,7 +118,7 @@ impl Repository {
         trace!("Read repository info successfully.");
 
         let repository = Repository {
-            workspace: path.as_ref().to_path_buf(),
+            workspace: path.to_path_buf(),
             repository: repo,
             lockfile,
             store: Store::new(store),
@@ -124,18 +130,20 @@ impl Repository {
         Ok(repository)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn create(path: impl AsRef<Path>, _options: &Cli) -> Result<Repository, EvsError> {
+    pub fn create<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
         debug!("Repository::create(self, {:?})", path.as_ref());
 
-        let _ = path
-            .as_ref()
-            .read_dir()
-            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+        Self::create_(path.as_ref(), options)
+    }
+
+    fn create_(path: &Path, _options: &Cli) -> Result<Repository, EvsError> {
+        let _ = path.read_dir().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Workspace exists and is a directory.");
 
-        let repo = path.as_ref().join(".evs");
+        let repo = path.join(".evs");
 
         DirBuilder::new()
             .create(&repo)
@@ -143,7 +151,7 @@ impl Repository {
 
         trace!("Created repository directory.");
 
-        let repo = repo.canonicalize().expect("repo dir was just created");
+        let repo = repo.canonicalize().map_err(|e| (e, repo))?;
 
         trace!("Repository directory was canonicalized.");
 
@@ -185,13 +193,13 @@ impl Repository {
         };
 
         lockfile
-            .write_all(&rmp_serde::to_vec(&repo_info).expect("msgpack failed"))
+            .write_all(&rmp_serde::to_vec(&repo_info)?)
             .map_err(|e| (e, lockfile_path.clone()))?;
 
         trace!("Wrote repository info into the lockfile.");
 
         let repository = Repository {
-            workspace: path.as_ref().to_path_buf(),
+            workspace: path.to_path_buf(),
             repository: repo,
             lockfile,
             store,
@@ -203,14 +211,16 @@ impl Repository {
         Ok(repository)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn find(path: impl AsRef<Path>, options: &Cli) -> Result<Repository, EvsError> {
+    pub fn find<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
         debug!("Repository::find({:?})", path.as_ref());
 
-        let mut path = path
-            .as_ref()
-            .canonicalize()
-            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+        Self::find_(path.as_ref(), options)
+    }
+
+    fn find_(path: &Path, options: &Cli) -> Result<Repository, EvsError> {
+        let mut path = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path.");
 
@@ -235,19 +245,21 @@ impl Repository {
         }
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn check(&self) -> Result<(), EvsError> {
         debug!("Repository::check(self)");
 
         self.store
-            .check(HashSet::new(), [self.info.head(), self.info.stage()], None)
+            .check::<&[Hash]>(HashSet::new(), &[self.info.head(), self.info.stage()], None)
             .map(|_| ())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn add(
+    pub fn add<T: AsRef<Path>>(
         &mut self,
-        path: impl AsRef<Path>,
+        path: T,
         overrides: &HashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(), EvsError> {
@@ -257,10 +269,16 @@ impl Repository {
             overrides
         );
 
-        let canon = path
-            .as_ref()
-            .canonicalize()
-            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+        self.add_(path.as_ref(), overrides, options)
+    }
+
+    fn add_(
+        &mut self,
+        path: &Path,
+        overrides: &HashSet<PathBuf>,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
+        let canon = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
 
@@ -325,7 +343,7 @@ impl Repository {
         trace!("Recomputed stage.");
 
         if self.info.stage() == new_stage {
-            trace!("New stage is equal to old stage.")
+            trace!("New stage is equal to old stage.");
         } else {
             self.info.set_stage(new_stage);
         }
@@ -333,22 +351,22 @@ impl Repository {
         Ok(())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn sub(&mut self, path: impl AsRef<Path>) -> Result<(), EvsError> {
+    pub fn sub<T: AsRef<Path>>(&mut self, path: T) -> Result<(), EvsError> {
         debug!("Repository::sub(self, {:?})", path.as_ref());
 
+        self.sub_(path.as_ref())
+    }
+
+    fn sub_(&mut self, path: &Path) -> Result<(), EvsError> {
         let canon = path
-            .as_ref()
             .canonicalize() //TODO: ALTERNATIVE WITH PARTIAL CANONICALIZE (CUSTOM?)
-            .map_err(|e| (e, path.as_ref().to_path_buf()))?;
+            .map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
 
-        if !canon.starts_with(
-            self.repository
-                .parent()
-                .expect("repository should have parent"),
-        ) {
+        if !canon.starts_with(&self.workspace) {
             return Err(EvsError::PathOutsideOfRepo(canon));
         }
 
@@ -377,7 +395,7 @@ impl Repository {
         trace!("Recomputed stage.");
 
         if self.info.stage() == new_stage {
-            trace!("New stage is equal to old stage.")
+            trace!("New stage is equal to old stage.");
         } else {
             self.info.set_stage(new_stage);
         }
@@ -399,7 +417,7 @@ impl Repository {
             "Repository::update_stage(self, {:?}, {:?}..., {}, {})",
             path.as_ref(),
             next,
-            obj.map(|_| "inserting").unwrap_or("deleting"),
+            obj.map_or("deleting", |_| "inserting"),
             HashDisplay(&tree)
         );
 
@@ -422,15 +440,13 @@ impl Repository {
         let hash = if components.peek().is_none() {
             obj
         } else {
-            let next = match items.iter().find(|e| e.name.as_bytes() == next_bytes) {
-                Some(next) => next.content,
-                None => {
-                    if obj.is_none() {
-                        return Err(EvsError::PathNotInStage(path.to_path_buf()));
-                    } else {
-                        self.store.insert(Object::Tree(vec![]))?
-                    }
+            let next = if let Some(next) = items.iter().find(|e| e.name.as_bytes() == next_bytes) {
+                next.content
+            } else {
+                if obj.is_none() {
+                    return Err(EvsError::PathNotInStage(path.to_path_buf()));
                 }
+                self.store.insert(Object::Tree(vec![]))?
             };
 
             self.update_stage(components, path, obj, next)?
@@ -439,6 +455,7 @@ impl Repository {
         trace!("Obtained hash or lack thereof of later component(s).");
 
         let hash = if let Some(obj) = hash {
+            #[allow(clippy::indexing_slicing, reason = "The index comes from enumerate.")]
             if let Some(index) = items
                 .iter()
                 .enumerate()
@@ -560,6 +577,7 @@ impl Repository {
         Ok(res)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn commit(
         &mut self,
@@ -595,8 +613,9 @@ impl Repository {
         Ok(commit)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn lookup(&self, r#ref: impl AsRef<str>) -> Result<(Hash, Object), EvsError> {
+    pub fn lookup<T: AsRef<str>>(&self, r#ref: T) -> Result<(Hash, Object), EvsError> {
         debug!("Repository::lookup(self, \"{}\")", r#ref.as_ref());
 
         let resolved = self.resolve(r#ref)?;
@@ -606,10 +625,11 @@ impl Repository {
         self.store.lookup(resolved.as_str())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn log(
+    pub fn log<T: AsRef<str>>(
         &self,
-        r#ref: impl AsRef<str>,
+        r#ref: T,
         limit: usize,
         oneline: bool,
         options: &Cli,
@@ -621,6 +641,16 @@ impl Repository {
             oneline
         );
 
+        self.log_(r#ref.as_ref(), limit, oneline, options)
+    }
+
+    fn log_(
+        &self,
+        r#ref: &str,
+        limit: usize,
+        oneline: bool,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         let print_color = get_color(options);
 
         let mod_color = if print_color { MOD_COLOR } else { "" };
@@ -674,14 +704,16 @@ impl Repository {
         Ok(())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn resolve(&self, r#ref: impl AsRef<str>) -> Result<String, EvsError> {
+    pub fn resolve<T: AsRef<str>>(&self, r#ref: T) -> Result<String, EvsError> {
         debug!("Repository::resolve(self, \"{}\")", r#ref.as_ref());
 
-        let (first, back_count) = r#ref
-            .as_ref()
-            .split_once('~')
-            .unwrap_or((r#ref.as_ref(), "0"));
+        self.resolve_(r#ref.as_ref())
+    }
+
+    fn resolve_(&self, r#ref: &str) -> Result<String, EvsError> {
+        let (first, back_count) = r#ref.split_once('~').unwrap_or((r#ref, "0"));
 
         let back_count = back_count
             .parse::<usize>()
@@ -705,21 +737,22 @@ impl Repository {
                 _ => return Err(EvsError::NotACommit(hash)),
             };
 
-            trace!("Gone back to \"{}\".", resolved)
+            trace!("Gone back to \"{}\".", resolved);
         }
 
         self.store.resolve_rest(resolved)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn gc(&self, _options: &Cli) -> Result<(), EvsError> {
         debug!("Repository::gc(self)");
 
         let mut dependencies = None;
 
-        self.store.check(
+        self.store.check::<&[Hash]>(
             HashSet::new(),
-            [self.info.head(), self.info.stage()],
+            &[self.info.head(), self.info.stage()],
             Some(&mut dependencies),
         )?;
 
@@ -732,9 +765,9 @@ impl Repository {
 
         let mut deletion_list = vec![];
 
-        let mut tree_count = 0;
-        let mut commit_count = 0;
-        let mut blob_count = 0;
+        let mut tree_count: usize = 0;
+        let mut commit_count: usize = 0;
+        let mut blob_count: usize = 0;
 
         while let Some((k, _)) = dependencies.iter().find(|(_, v)| **v == 0) {
             let k = *k;
@@ -750,7 +783,10 @@ impl Repository {
             match self.store.lookup(&hash_display)?.1 {
                 Object::Null => (),
                 Object::Blob(_) => {
-                    blob_count += 1;
+                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
+                    {
+                        blob_count += 1;
+                    }
                 }
                 Object::Tree(items) => {
                     for item in items {
@@ -758,28 +794,43 @@ impl Repository {
 
                         dependencies.insert(
                             item.content,
-                            dependencies.get(&item.content).unwrap_or(&1) - 1,
+                            dependencies
+                                .get(&item.content)
+                                .unwrap_or(&1)
+                                .saturating_sub(1),
                         );
                     }
 
-                    tree_count += 1;
+                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
+                    {
+                        tree_count += 1;
+                    }
                 }
                 Object::Commit(commit) => {
                     trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.tree));
 
                     dependencies.insert(
                         commit.tree,
-                        dependencies.get(&commit.tree).unwrap_or(&1) - 1,
+                        dependencies
+                            .get(&commit.tree)
+                            .unwrap_or(&1)
+                            .saturating_sub(1),
                     );
 
                     trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.parent));
 
                     dependencies.insert(
                         commit.parent,
-                        dependencies.get(&commit.parent).unwrap_or(&1) - 1,
+                        dependencies
+                            .get(&commit.parent)
+                            .unwrap_or(&1)
+                            .saturating_sub(1),
                     );
 
-                    commit_count += 1;
+                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
+                    {
+                        commit_count += 1;
+                    }
                 }
             }
         }
@@ -807,6 +858,7 @@ impl Repository {
         Ok(())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn get_tree(&self, commit: Hash) -> Result<Hash, EvsError> {
         debug!("Repository::get_tree(self, \"{}\")", HashDisplay(&commit));
@@ -822,6 +874,7 @@ impl Repository {
         })
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn get_ignores(&self, _options: &Cli) -> Result<Vec<Pattern>, EvsError> {
         debug!("Repository::get_ignores(self)");
@@ -850,6 +903,7 @@ impl Repository {
             .map_err(Into::into)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn status(&self, options: &Cli) -> Result<(), EvsError> {
         debug!("Repository::status(self)");
@@ -885,22 +939,24 @@ impl Repository {
 
         trace!("Read diffsides: {:?} -> {:?} -> {:?}.", cds.0, sds.0, lds.0);
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         let (stage_added, stage_modified, stage_removed) = (
             sds.0.difference(&cds.0).collect(),
             sds.0
                 .intersection(&cds.0)
-                .filter(|k| cds.1.get(*k).unwrap() != sds.1.get(*k).unwrap())
+                .filter(|k| cds.1[*k] != sds.1[*k])
                 .collect(),
             cds.0.difference(&sds.0).collect(),
         );
 
         trace!("Generated stage diff.");
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         let (local_added, local_modified, local_removed) = (
             lds.0.difference(&sds.0).collect(),
             lds.0
                 .intersection(&sds.0)
-                .filter(|k| sds.1.get(*k).unwrap() != lds.1.get(*k).unwrap())
+                .filter(|k| sds.1[*k] != lds.1[*k])
                 .collect(),
             sds.0.difference(&lds.0).collect(),
         );
@@ -924,7 +980,8 @@ impl Repository {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[inline]
+    #[allow(clippy::too_many_arguments, reason = "This is fine.")]
     pub fn print_info(
         &self,
         store_count: usize,
@@ -951,7 +1008,7 @@ impl Repository {
             store_count,
             SizeDisplay(store_size, print_color)
         );
-        if stage_added.len() + stage_modified.len() + stage_removed.len() > 0 {
+        if !stage_added.is_empty() || !stage_modified.is_empty() || !stage_removed.is_empty() {
             println!();
             println!("  Staged changes:");
             print!("{}", add_color);
@@ -967,7 +1024,7 @@ impl Repository {
                 println!("    removed {:?}", deletion);
             }
         }
-        if local_added.len() + local_modified.len() + local_removed.len() > 0 {
+        if !local_added.is_empty() || !local_modified.is_empty() || !local_removed.is_empty() {
             println!("{}", none_color);
             println!("  Unstaged changes:");
             print!("{}", add_color);
@@ -988,10 +1045,15 @@ impl Repository {
         let _ = stdout().flush();
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn show(&self, r#ref: impl AsRef<str>, options: &Cli) -> Result<(), EvsError> {
+    pub fn show<T: AsRef<str>>(&self, r#ref: T, options: &Cli) -> Result<(), EvsError> {
         debug!("Repository::show(self, \"{}\")", r#ref.as_ref());
 
+        self.show_(r#ref.as_ref(), options)
+    }
+
+    fn show_(&self, r#ref: &str, options: &Cli) -> Result<(), EvsError> {
         let (hash, commit) = self.lookup(r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
@@ -1018,15 +1080,20 @@ impl Repository {
         )
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn checkout(
+    pub fn checkout<T: AsRef<str>>(
         &mut self,
-        r#ref: impl AsRef<str>,
+        r#ref: T,
         force: bool,
         options: &Cli,
     ) -> Result<Hash, EvsError> {
         debug!("Repository::checkout(self, \"{}\")", r#ref.as_ref());
 
+        self.checkout_(r#ref.as_ref(), force, options)
+    }
+
+    fn checkout_(&mut self, r#ref: &str, force: bool, options: &Cli) -> Result<Hash, EvsError> {
         let (hash, _) = self.lookup(r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
@@ -1076,12 +1143,10 @@ impl Repository {
 
         trace!("Read diffsides.");
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         if ds.0.difference(&dl.0).count() > 0
             || dl.0.difference(&ds.0).any(|k| dd.0.contains(k))
-            || ds
-                .0
-                .intersection(&dl.0)
-                .any(|k| ds.1.get(k).unwrap() != dl.1.get(k).unwrap())
+            || ds.0.intersection(&dl.0).any(|k| ds.1[k] != dl.1[k])
         {
             if force
                 || confirmation!(
@@ -1125,8 +1190,9 @@ impl Repository {
 
         trace!("Deleted files...");
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         for file in dd.0.difference(&ds.0) {
-            let content = dd.1.get(file).unwrap();
+            let content = &dd.1[file];
 
             let file = self.workspace.join(file);
 
@@ -1144,9 +1210,10 @@ impl Repository {
 
         trace!("Created new files...");
 
+        #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         for (file, _, content) in
             ds.0.intersection(&dd.0)
-                .map(|k| (k, ds.1.get(k).unwrap(), dd.1.get(k).unwrap()))
+                .map(|k| (k, &ds.1[k], &dd.1[k]))
                 .filter(|(_, lhs, rhs)| lhs != rhs)
         {
             let file = self.workspace.join(file);
@@ -1165,13 +1232,16 @@ impl Repository {
 }
 
 impl Drop for Repository {
+    #[inline]
     fn drop(&mut self) {
         let r = || -> Result<(), io::Error> {
             if self.info.modified {
                 self.lockfile.set_len(0)?;
                 self.lockfile.seek(SeekFrom::Start(0))?;
                 self.lockfile
-                    .write_all(&rmp_serde::to_vec(&self.info).expect("msgpack failed"))?;
+                    .write_all(&rmp_serde::to_vec(&self.info).map_err(|_e| {
+                        io::Error::new(ErrorKind::InvalidData, "encoder failed")
+                    })?)?;
             }
 
             Ok(())
@@ -1183,7 +1253,7 @@ impl Drop for Repository {
     }
 }
 
-/// All of the info about the repository
+/// All of the info about the repository.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RepositoryInfo {
     head: Hash,
@@ -1193,19 +1263,25 @@ pub struct RepositoryInfo {
 }
 
 impl RepositoryInfo {
+    #[inline]
+    #[must_use]
     pub fn head(&self) -> Hash {
         self.head
     }
 
+    #[inline]
     pub fn set_head(&mut self, new_head: Hash) {
         self.modified = self.head != new_head;
         self.head = new_head;
     }
 
+    #[inline]
+    #[must_use]
     pub fn stage(&self) -> Hash {
         self.stage
     }
 
+    #[inline]
     pub fn set_stage(&mut self, new_stage: Hash) {
         self.modified = self.stage != new_stage;
         self.stage = new_stage;

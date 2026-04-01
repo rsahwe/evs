@@ -1,8 +1,8 @@
 use std::{
     env::var_os,
     ffi::OsStr,
-    fmt::{Arguments, Display},
-    io::{BufRead, IsTerminal, Write, stdin, stdout},
+    fmt::{self, Arguments, Display, Formatter},
+    io::{BufRead as _, IsTerminal as _, Write as _, stdin, stdout},
     path::{self, Path},
 };
 
@@ -23,6 +23,7 @@ macro_rules! confirmation {
     };
 }
 
+#[inline]
 #[instrument(level = "debug", err(level = "debug"), skip_all)]
 pub fn confirmation_impl(prompt: Arguments, default: bool) -> Result<bool, EvsError> {
     let yn = if default { "[Y/n]" } else { "[y/N]" };
@@ -55,6 +56,8 @@ pub fn confirmation_impl(prompt: Arguments, default: bool) -> Result<bool, EvsEr
     Ok(response)
 }
 
+#[inline]
+#[must_use]
 pub fn get_color(options: &Cli) -> bool {
     !(options.no_color
         || var_os("NO_COLOR").is_some_and(|v| !v.is_empty())
@@ -71,10 +74,11 @@ pub const NONE_COLOR: &str = "\x1b[0m";
 pub struct SizeDisplay(pub usize, pub bool);
 
 impl Display for SizeDisplay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.0 {
-            0..1000 => write!(f, "{}{}B{}", ADD_COLOR, self.0, NONE_COLOR),
-            1000..1000000 => write!(
+            0..1_000 => write!(f, "{}{}B{}", ADD_COLOR, self.0, NONE_COLOR),
+            1_000..1_000_000 => write!(
                 f,
                 "{}{}.{}KB{}",
                 ADD_COLOR,
@@ -82,34 +86,35 @@ impl Display for SizeDisplay {
                 (self.0 / 100) % 10,
                 NONE_COLOR
             ),
-            1000000..20000000 => write!(
+            1_000_000..20_000_000 => write!(
                 f,
                 "{}{}.{}MB{}",
                 ADD_COLOR,
-                self.0 / 1000000,
-                (self.0 / 100000) % 10,
+                self.0 / 1_000_000,
+                (self.0 / 100_000) % 10,
                 NONE_COLOR
             ),
-            20000000..1000000000 => write!(
+            20_000_000..1_000_000_000 => write!(
                 f,
                 "{}{}.{}MB{}",
                 MOD_COLOR,
-                self.0 / 1000000,
-                (self.0 / 100000) % 10,
+                self.0 / 1_000_000,
+                (self.0 / 100_000) % 10,
                 NONE_COLOR
             ),
-            1000000000.. => write!(
+            1_000_000_000.. => write!(
                 f,
                 "{}{}.{}GB{}",
                 SUB_COLOR,
-                self.0 / 1000000000,
-                (self.0 / 100000000) % 10,
+                self.0 / 1_000_000_000,
+                (self.0 / 100_000_000) % 10,
                 NONE_COLOR
             ),
         }
     }
 }
 
+#[inline]
 pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();

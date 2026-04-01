@@ -1,4 +1,8 @@
-use std::{fmt::Display, ops::Deref, time::SystemTime};
+use std::{
+    fmt::{self, Display, Formatter},
+    ops::Deref as _,
+    time::SystemTime,
+};
 
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -31,7 +35,8 @@ pub enum Object {
 }
 
 impl Display for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Object::Null => write!(f, "Null object :)"),
             Object::Blob(items) => write!(f, "Blob:\n{}", items.deref().escape_ascii()),
@@ -53,9 +58,7 @@ impl Display for Object {
                 "  Commit by {} <{}> at {}\n  - \"{}\" state\n  - \"{}\" parent\n\n{}",
                 commit.name,
                 commit.email,
-                OffsetDateTime::from(commit.date)
-                    .format(&Rfc3339)
-                    .expect("I think this can't fail"),
+                OffsetDateTime::from(commit.date).format(&Rfc3339).unwrap(), // This can't fail I think
                 HashDisplay(&commit.tree),
                 HashDisplay(&commit.parent),
                 commit.msg.lines().fold(String::new(), |mut acc, l| {

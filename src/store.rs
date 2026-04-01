@@ -1,13 +1,13 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Display,
+    fmt::{self, Display, Formatter},
     fs::{self, OpenOptions},
-    io::{Read, Write},
+    io::{Read as _, Write as _},
     path::PathBuf,
 };
 
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
-use sha2::{Digest, Sha256};
+use sha2::{Digest as _, Sha256};
 use tracing::{debug, instrument, trace};
 
 use crate::{
@@ -18,12 +18,15 @@ use crate::{
 pub type Hash = [u8; 32];
 pub type PartialHash<'a> = &'a [u8];
 
-/// Needs to double the length of a hash (it does)
+const FORMATTED_HASH_SIZE: usize = size_of::<Hash>() * 2;
+
+/// Needs to double the length of a hash (it does).
 #[derive(Debug)]
 pub struct HashDisplay<'a>(pub PartialHash<'a>);
 
-impl<'a> Display for HashDisplay<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for HashDisplay<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for el in self.0 {
             write!(f, "{:02x}", el)?;
         }
@@ -38,15 +41,20 @@ pub struct Store {
 }
 
 impl Store {
+    #[inline]
+    #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
+    #[inline]
+    #[must_use]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
 
     /// Assumes a valid store and might cause unintended behaviour
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn insert(&self, mut obj: Object) -> Result<Hash, EvsError> {
         debug!("Store::insert(self, ...)");
@@ -55,7 +63,7 @@ impl Store {
             entries.sort_by(|a, b| a.name.cmp(&b.name));
         }
 
-        let data = rmp_serde::to_vec(&obj).expect("msgpack failed");
+        let data = rmp_serde::to_vec(&obj)?;
 
         trace!("Serialized object to size {}.", data.len());
 
@@ -67,13 +75,13 @@ impl Store {
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
 
-        encoder
-            .write_all(&data)
-            .expect("gzip encoder failed: io error on vec");
+        if encoder.write_all(&data).is_err() {
+            unreachable!("gzip encoder failed: io error on vec");
+        }
 
-        let compressed = encoder
-            .finish()
-            .expect("gzip encoder failed: io error on vec");
+        let Ok(compressed) = encoder.finish() else {
+            unreachable!("gzip encoder failed: io error on vec");
+        };
 
         trace!(
             "Compressed data from {} to {} bytes.",
@@ -105,9 +113,10 @@ impl Store {
         }
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn lookup(&self, id: &str) -> Result<(Hash, Object), EvsError> {
-        if size_of_val(id) > size_of::<Hash>() * 2 {
+        if size_of_val(id) > FORMATTED_HASH_SIZE {
             debug!("Store::lookup(self, <overlength hash>)");
 
             return Err(EvsError::ObjectNotInStore(id.to_owned()));
@@ -116,7 +125,7 @@ impl Store {
         debug!(
             "Store::lookup(self, \"{}{}\")",
             id,
-            if size_of_val(id) < size_of::<Hash>() * 2 {
+            if size_of_val(id) < FORMATTED_HASH_SIZE {
                 "..."
             } else {
                 ""
@@ -125,7 +134,7 @@ impl Store {
 
         let mut target = None;
 
-        if size_of_val(id) == size_of::<Hash>() * 2 {
+        if size_of_val(id) == FORMATTED_HASH_SIZE {
             let path = self.path.join(id);
 
             target = fs::exists(&path).is_ok().then_some(path);
@@ -158,7 +167,7 @@ impl Store {
 
         let target_name = target.file_name().unwrap();
 
-        if size_of_val(target_name) != size_of::<Hash>() * 2
+        if size_of_val(target_name) != FORMATTED_HASH_SIZE
             || !target_name
                 .as_encoded_bytes()
                 .iter()
@@ -204,15 +213,25 @@ impl Store {
         Ok((real_hash, deserialized))
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn check(
+    pub fn check<T: AsRef<[Hash]>>(
+        &self,
+        found: HashSet<Hash>,
+        required: T,
+        dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
+    ) -> Result<HashSet<Hash>, EvsError> {
+        debug!("Store::check(self, <{} hash(es)>)", required.as_ref().len());
+
+        self.check_(found, required.as_ref(), dependency_info)
+    }
+
+    fn check_(
         &self,
         mut found: HashSet<Hash>,
         required: impl AsRef<[Hash]>,
         dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
     ) -> Result<HashSet<Hash>, EvsError> {
-        debug!("Store::check(self, <{} hash(es)>)", required.as_ref().len());
-
         let (mut required, mut dependencies) = {
             let mut hm = HashSet::new();
             let mut dep = HashMap::new();
@@ -234,7 +253,7 @@ impl Store {
 
             let bytes = name.as_encoded_bytes();
 
-            if size_of_val(bytes) != size_of::<Hash>() * 2 || name.to_str().is_none() {
+            if size_of_val(bytes) != FORMATTED_HASH_SIZE || name.to_str().is_none() {
                 return Err(EvsError::CorruptStateDetected(
                     CorruptState::InvalidObjectName(name),
                 ));
@@ -258,6 +277,10 @@ impl Store {
                         );
 
                         required.insert(item.content);
+                        #[allow(
+                            clippy::arithmetic_side_effects,
+                            reason = "Never going to happen."
+                        )]
                         dependencies.insert(
                             item.content,
                             dependencies.get(&item.content).unwrap_or(&0) + 1,
@@ -278,6 +301,7 @@ impl Store {
                     );
 
                     required.insert(commit.tree);
+                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
                     dependencies.insert(
                         commit.tree,
                         dependencies.get(&commit.tree).unwrap_or(&0) + 1,
@@ -290,6 +314,7 @@ impl Store {
                     );
 
                     required.insert(commit.parent);
+                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
                     dependencies.insert(
                         commit.parent,
                         dependencies.get(&commit.parent).unwrap_or(&0) + 1,
@@ -300,10 +325,10 @@ impl Store {
             found.insert(hash);
         }
 
-        let unnecessary_count = found.difference(&required).fold(0, |acc, n| {
-            dependencies.insert(*n, 0);
-            acc + 1
-        });
+        let unnecessary_count = found
+            .difference(&required)
+            .map(|n| dependencies.insert(*n, 0))
+            .count();
 
         trace!(
             "Finished validating {}/{} (+{}) objects.",
@@ -312,7 +337,7 @@ impl Store {
             unnecessary_count,
         );
 
-        let mut missing = required.difference(&found).cloned();
+        let mut missing = required.difference(&found).copied();
 
         if let Some(first) = missing.next() {
             return Err(EvsError::CorruptStateDetected(
@@ -329,6 +354,7 @@ impl Store {
         Ok(found)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn remove(&self, path: Hash) -> Result<(), EvsError> {
         debug!("Store::remove(self, \"{}\")", HashDisplay(&path));
@@ -342,13 +368,14 @@ impl Store {
         Ok(())
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn resolve_rest(&self, r#ref: String) -> Result<String, EvsError> {
         debug!("Store::resolve_rest(self, \"{}\")", r#ref);
 
         let mut target = None;
 
-        if size_of_val(r#ref.as_str()) == size_of::<Hash>() * 2 {
+        if size_of_val(r#ref.as_str()) == FORMATTED_HASH_SIZE {
             let path = self.path.join(&r#ref);
 
             trace!("Fast lookup of {:?}...", path);
@@ -387,7 +414,7 @@ impl Store {
 
         let target_name = target.file_name().unwrap();
 
-        if size_of_val(target_name) != size_of::<Hash>() * 2
+        if size_of_val(target_name) != FORMATTED_HASH_SIZE
             || !target_name
                 .as_encoded_bytes()
                 .iter()
@@ -405,6 +432,7 @@ impl Store {
         Ok(resolved)
     }
 
+    #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn status(&self) -> Result<(usize, usize), EvsError> {
         debug!("Store::status(self)");
@@ -412,10 +440,14 @@ impl Store {
         self.path
             .read_dir()
             .map_err(|e| (e, self.path.clone()))?
-            .try_fold((0, 0), |(count, size), entry| match entry {
+            .try_fold((0, 0usize), |(count, size), entry| match entry {
+                #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
                 Ok(entry) => Ok((
                     count + 1,
-                    size + entry.metadata().map_err(|e| (e, entry.path()))?.len() as usize,
+                    size.saturating_add(
+                        usize::try_from(entry.metadata().map_err(|e| (e, entry.path()))?.len())
+                            .unwrap(),
+                    ),
                 )),
                 Err(err) => Err((err, self.path.clone()).into()),
             })

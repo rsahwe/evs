@@ -1,15 +1,15 @@
 use std::{
     collections::HashSet,
-    io::{Write, stdout},
+    io::{Write as _, stdout},
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueHint};
+use clap::{ArgAction, CommandFactory as _, Parser, Subcommand, ValueHint};
 use clap_complete::ArgValueCompleter;
 use enable_ansi_support::enable_ansi_support;
 use tracing::{Level, info, trace};
-use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitExt as _};
 
 use crate::{
     diff::DiffSide,
@@ -34,7 +34,7 @@ pub struct Cli {
     #[arg(short, action(ArgAction::Count), global(true))]
     pub verbose: u8,
 
-    /// Disables color printing which can also be done by setting the NO_COLOR variable to something.
+    /// Disables color printing which can also be done by setting the `NO_COLOR` variable to something.
     #[arg(long, global(true))]
     pub no_color: bool,
 
@@ -65,13 +65,13 @@ pub enum Commands {
         #[arg(add(ArgValueCompleter::new(repo_ref_completer)))]
         r#ref: String,
     },
-    /// Adds the given files and directories to the evs store and stage
+    /// Adds the given files and directories to the evs store and stage.
     Add {
         /// The list of files and directories to add.
         #[arg(value_hint(ValueHint::AnyPath))]
         paths: Vec<PathBuf>,
     },
-    /// Removes the given files and directories from the evs stage
+    /// Removes the given files and directories from the evs stage.
     Sub {
         /// The list of files and directories to remove.
         #[arg(value_hint(ValueHint::AnyPath))]
@@ -148,7 +148,7 @@ pub enum Commands {
     },
     /// Switches the state of the worktree to a different commit.
     Checkout {
-        /// Whether or not to discard staged changes
+        /// Whether or not to discard staged changes.
         #[arg(short, long)]
         force: bool,
         /// The commit to checkout.
@@ -167,6 +167,11 @@ pub enum Commands {
 }
 
 impl Cli {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "This is just because of the number of subcommands + this is totally fine due to the separation in the match."
+    )]
+    #[inline]
     pub fn run(mut self) -> Result<(), EvsError> {
         if enable_ansi_support().is_err() {
             self.no_color = true;
@@ -215,7 +220,7 @@ impl Cli {
 
         match &self.command {
             Commands::Init { path } => {
-                let path = path.as_ref().map(ToOwned::to_owned).unwrap_or(".".into());
+                let path = path.as_ref().map_or(".".into(), ToOwned::to_owned);
 
                 info!("Creating repository at {:?}...", path);
 
@@ -246,11 +251,9 @@ impl Cli {
                 if !raw {
                     println!("{}", obj);
                 } else {
-                    let content = rmp_serde::to_vec(&obj).expect("msgpack failed");
+                    let content = rmp_serde::to_vec(&obj)?;
 
-                    stdout()
-                        .write_all(&content)
-                        .expect("write to stdout failed");
+                    let _ = stdout().write_all(&content);
                 }
             }
             Commands::Add { paths } => {
@@ -274,7 +277,7 @@ impl Cli {
                     info!("Added {:?}", file);
                 }
 
-                info!("Finished adding.")
+                info!("Finished adding.");
             }
             Commands::Sub { paths } => {
                 let mut repo = get_repo!();
@@ -287,7 +290,7 @@ impl Cli {
                     info!("Removed {:?}", file);
                 }
 
-                info!("Finished removing.")
+                info!("Finished removing.");
             }
             Commands::Commit {
                 message,
@@ -390,8 +393,8 @@ impl Cli {
                             p.canonicalize()
                                 .map_err(|e| (e, p.clone()))?
                                 .strip_prefix(&repo.workspace)
-                                .map(|p| p.to_path_buf())
-                                .map_err(|_| EvsError::PathOutsideOfRepo(p.clone()))
+                                .map(Path::to_path_buf)
+                                .map_err(|_e| EvsError::PathOutsideOfRepo(p.clone()))
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     repo.get_ignores(&self)?,
