@@ -116,10 +116,10 @@ evs show HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [ ] Custom partial canonicalize
+- [ ] More documentation (+ better man pages?)
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs
 - [ ] Merge tools for evs
 - [ ] Tests
-- [ ] More documentation (+ better man pages?)
 - [ ] ...

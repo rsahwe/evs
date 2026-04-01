@@ -8,10 +8,10 @@
 
   outputs =
     inputs:
-    inputs.flake-parts.lib.mkFlake { inherit inputs; } {
+    inputs.flake-parts.lib.mkFlake { inherit inputs; } rec {
       systems = [ "x86_64-linux" ];
       perSystem =
-        { pkgs, lib, ... }:
+        { self', pkgs, lib, ... }:
         {
           packages.evs =
             let
@@ -29,7 +29,8 @@
                 description = manifest.package.description;
                 homepage = manifest.package.repository;
                 license = lib.licenses.mit;
-                mainProgram = "evs";
+                mainProgram = manifest.package.name;
+                platforms = systems;
               };
 
               postInstall = 
@@ -48,6 +49,8 @@
                   ${lib.concatStringsSep "\n" (lib.forEach shells genShellCompletion)}
                 '';
             };
+
+          packages.default = self'.packages.evs;
         };
     };
 }
