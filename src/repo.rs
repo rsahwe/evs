@@ -292,9 +292,11 @@ impl Repository {
 
         trace!("Using ignores: {:?}.", ignores);
 
-        if ignores
+        let is_ignored = ignores
             .iter()
-            .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
+            .any(|i| relative.ancestors().any(|a| i.matches_path(a)));
+
+        if is_ignored
             && !overrides.contains(relative)
             && (relative.starts_with(".evs")
                 || !confirmation!(false, "{:?} is ignored, add anyway?", relative)?)
@@ -305,6 +307,8 @@ impl Repository {
         }
 
         let hash = if canon.is_dir() {
+            let ignores = if is_ignored { &vec![] } else { &ignores };
+
             let hash = self.hash_dir(&canon, ignores, overrides)?;
 
             if relative == "" {

@@ -15,6 +15,9 @@ use crate::{
     objects::Object,
 };
 
+// This is basically as good as 9 (best), but significantly faster. Later it will be configurable.
+const COMPRESSION_LEVEL: u32 = 4;
+
 pub type Hash = [u8; 32];
 pub type PartialHash<'a> = &'a [u8];
 
@@ -73,7 +76,7 @@ impl Store {
 
         trace!("Data hashed to \"{}\".", hash_display);
 
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::new(COMPRESSION_LEVEL));
 
         if encoder.write_all(&data).is_err() {
             unreachable!("gzip encoder failed: io error on vec");

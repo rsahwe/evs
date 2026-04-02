@@ -61,7 +61,7 @@ evs gc
 ### To just print the resolved object name:
 
 ```bash
-evs resolve HEAD
+evs resolve HEAD~1
 ```
 
 ### To show the difference between two commits in the current directory:
@@ -90,6 +90,12 @@ evs status
 evs show HEAD
 ```
 
+### To switch the worktree to a different commit:
+
+```bash
+evs checkout HEAD
+```
+
 ## TODO:
 
 - [x] `evs init`
@@ -98,7 +104,6 @@ evs show HEAD
 - [x] `evs add`
 - [x] `evs sub`
 - [x] `evs commit`
-    > `--amend`
 - [x] `evs log`
 - [x] `evs gc`
 - [x] `evs resolve`
@@ -116,10 +121,16 @@ evs show HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [ ] Custom partial canonicalize
+- [ ] Store rewrite with content handle and separate serialization and data for blobs
+- [ ] Different completion for commit hashes
+- [ ] `gc --soft` or `gc --hard` or `gc --force`
+- [ ] `commit --amend`
 - [ ] More documentation (+ better man pages?)
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs
 - [ ] Merge tools for evs
+- [ ] Configuration
+- [ ] Diff speedup and `--patch`
 - [ ] Tests
 - [ ] ...
