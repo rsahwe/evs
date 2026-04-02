@@ -2,13 +2,13 @@ use std::{
     env::var_os,
     ffi::OsStr,
     fmt::{self, Arguments, Display, Formatter},
-    io::{BufRead as _, IsTerminal as _, Write as _, stdin, stdout},
-    path::{self, Path},
+    io::{self, BufRead as _, ErrorKind, IsTerminal as _, Write as _, stdin, stdout},
+    path::{self, Path, PathBuf, absolute},
 };
 
 use clap_complete::CompletionCandidate;
 use glob::glob;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 use crate::{
     cli::{Cli, Commands},
@@ -158,4 +158,64 @@ pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
     }
 
     result
+}
+
+#[inline]
+#[instrument(level = "debug", err(level = "debug"), skip_all)]
+pub fn partial_canonicalize<T: AsRef<Path>>(path: T) -> io::Result<PathBuf> {
+    debug!("partial_canonicalize({:?})", path.as_ref());
+
+    let path = path.as_ref();
+
+    for ancestor in path.ancestors() {
+        if let Ok(real_ancestor) = ancestor.canonicalize() {
+            let rest = path.strip_prefix(ancestor).unwrap();
+
+            trace!("Found ancestor {:?} with rest {:?}...", real_ancestor, rest);
+
+            if rest == "" {
+                return Ok(real_ancestor);
+            }
+
+            if rest
+                .components()
+                .find(|c| {
+                    matches!(
+                        c,
+                        path::Component::ParentDir
+                            | path::Component::RootDir
+                            | path::Component::Prefix(_)
+                    )
+                })
+                .is_some()
+            {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidFilename,
+                    "cannot predict canonical form of ambiguous file path",
+                ));
+            }
+
+            return absolute(real_ancestor.join(rest));
+        }
+    }
+
+    trace!("No ancestor found.");
+
+    if path
+        .components()
+        .find(|c| {
+            matches!(
+                c,
+                path::Component::ParentDir | path::Component::RootDir | path::Component::Prefix(_)
+            )
+        })
+        .is_some()
+    {
+        return Err(io::Error::new(
+            ErrorKind::InvalidFilename,
+            "cannot predict canonical form of ambiguous file path",
+        ));
+    }
+
+    absolute(path)
 }

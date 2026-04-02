@@ -16,7 +16,7 @@ use crate::{
     error::EvsError,
     repo::Repository,
     store::HashDisplay,
-    util::{get_color, repo_ref_completer},
+    util::{get_color, partial_canonicalize, repo_ref_completer},
 };
 
 pub const VERBOSITY_NONE: u8 = 0;
@@ -390,7 +390,7 @@ impl Cli {
                     paths
                         .iter()
                         .map(|p| {
-                            p.canonicalize()
+                            partial_canonicalize(p)
                                 .map_err(|e| (e, p.clone()))?
                                 .strip_prefix(&repo.workspace)
                                 .map(Path::to_path_buf)

@@ -18,7 +18,10 @@ use crate::{
     error::{CorruptState, EvsError},
     objects::{Commit, Object, TreeEntry},
     store::{Hash, HashDisplay, Store},
-    util::{ADD_COLOR, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, get_color},
+    util::{
+        ADD_COLOR, INFO_COLOR, MOD_COLOR, NONE_COLOR, SUB_COLOR, SizeDisplay, get_color,
+        partial_canonicalize,
+    },
 };
 
 #[derive(Debug)]
@@ -368,9 +371,7 @@ impl Repository {
     }
 
     fn sub_(&mut self, path: &Path) -> Result<(), EvsError> {
-        let canon = path
-            .canonicalize() //TODO: ALTERNATIVE WITH PARTIAL CANONICALIZE (CUSTOM?)
-            .map_err(|e| (e, path.to_path_buf()))?;
+        let canon = partial_canonicalize(path).map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
 

@@ -120,12 +120,13 @@ evs checkout HEAD
 - [x] Use clippy
 - [x] Shell completions
 - [x] Nix flake
-- [ ] Custom partial canonicalize
+- [x] Custom partial canonicalize
 - [ ] rustfmt.toml
 - [ ] Store rewrite with content handle and separate serialization and data for blobs
-- [ ] Different completion for commit hashes
 - [ ] `gc --soft` or `gc --hard` or `gc --force`
+- [ ] Different completion for commit hashes
 - [ ] `commit --amend`
+- [ ] Ignores file overrides
 - [ ] More documentation (+ better man pages?)
 - [ ] Branch tools for evs
 - [ ] `evs clone`
