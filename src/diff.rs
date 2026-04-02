@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
     ffi::OsString,
     fmt::Write as _,
     fs,
@@ -9,6 +8,7 @@ use std::{
     str::FromStr as _,
 };
 
+use ahash::{AHashMap, AHashSet};
 use glob::Pattern;
 use similar::{DiffableStr, TextDiff, udiff::UnifiedDiff};
 use tracing::{debug, instrument, trace};
@@ -61,7 +61,7 @@ impl DiffSide {
             return Ok(());
         }
 
-        let lhs = from.read("", store, files, ignores, &HashSet::new())?;
+        let lhs = from.read("", store, files, ignores, &AHashSet::new())?;
 
         trace!("Read 'from' diff source: {:?}.", lhs.0);
 
@@ -101,8 +101,8 @@ impl DiffSide {
         store: &Store,
         filter: F,
         ignores: I,
-        overrides: &HashSet<PathBuf>,
-    ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
+        overrides: &AHashSet<PathBuf>,
+    ) -> Result<(AHashSet<PathBuf>, AHashMap<PathBuf, Vec<u8>>), EvsError> {
         debug!(
             "Diffside::read(self, {:?}, store, {:?}, {} ignores, {:?})",
             origin.as_ref(),
@@ -134,10 +134,10 @@ impl DiffSide {
         store: &Store,
         filter: &[PathBuf],
         ignores: &[Pattern],
-        overrides: &HashSet<PathBuf>,
-    ) -> Result<(HashSet<PathBuf>, HashMap<PathBuf, Vec<u8>>), EvsError> {
-        let mut sum_set = HashSet::new();
-        let mut sum_map = HashMap::new();
+        overrides: &AHashSet<PathBuf>,
+    ) -> Result<(AHashSet<PathBuf>, AHashMap<PathBuf, Vec<u8>>), EvsError> {
+        let mut sum_set = AHashSet::new();
+        let mut sum_map = AHashMap::new();
 
         let result = match self {
             DiffSide::Tree(tree) => {

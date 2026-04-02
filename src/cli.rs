@@ -1,10 +1,10 @@
 use std::{
-    collections::HashSet,
     io::{Write as _, stdout},
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
+use ahash::AHashSet;
 use clap::{ArgAction, CommandFactory as _, Parser, Subcommand, ValueHint};
 use clap_complete::ArgValueCompleter;
 use enable_ansi_support::enable_ansi_support;
@@ -266,7 +266,7 @@ impl Cli {
                     &repo.store,
                     &[AsRef::<Path>::as_ref("").to_path_buf()],
                     &[],
-                    &HashSet::new(),
+                    &AHashSet::new(),
                 )?;
 
                 drop(map);

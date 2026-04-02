@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fs::{self, DirBuilder, File, OpenOptions},
     io::{self, ErrorKind, Read as _, Seek as _, SeekFrom, Write as _, stdout},
     iter::{Peekable, once},
@@ -7,6 +6,7 @@ use std::{
     time::SystemTime,
 };
 
+use ahash::AHashSet;
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, instrument, trace, warn};
@@ -251,7 +251,11 @@ impl Repository {
         debug!("Repository::check(self)");
 
         self.store
-            .check::<&[Hash]>(HashSet::new(), &[self.info.head(), self.info.stage()], None)
+            .check::<&[Hash]>(
+                AHashSet::new(),
+                &[self.info.head(), self.info.stage()],
+                None,
+            )
             .map(|_| ())
     }
 
@@ -260,7 +264,7 @@ impl Repository {
     pub fn add<T: AsRef<Path>>(
         &mut self,
         path: T,
-        overrides: &HashSet<PathBuf>,
+        overrides: &AHashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(), EvsError> {
         debug!(
@@ -275,7 +279,7 @@ impl Repository {
     fn add_(
         &mut self,
         path: &Path,
-        overrides: &HashSet<PathBuf>,
+        overrides: &AHashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(), EvsError> {
         let canon = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
@@ -521,7 +525,7 @@ impl Repository {
         &self,
         path: &PathBuf,
         ignores: impl AsRef<[Pattern]>,
-        overrides: &HashSet<PathBuf>,
+        overrides: &AHashSet<PathBuf>,
     ) -> Result<Hash, EvsError> {
         debug!(
             "Repository::hash_dir(self, {:?}, {} ignores, {:?})",
@@ -755,7 +759,7 @@ impl Repository {
         let mut dependencies = None;
 
         self.store.check::<&[Hash]>(
-            HashSet::new(),
+            AHashSet::new(),
             &[self.info.head(), self.info.stage()],
             Some(&mut dependencies),
         )?;
@@ -933,7 +937,7 @@ impl Repository {
 
         let global_filter = [AsRef::<Path>::as_ref("").to_path_buf()];
 
-        let empty_set = HashSet::new();
+        let empty_set = AHashSet::new();
 
         let cds = commit_diffside.read("", &self.store, &global_filter, &ignores, &empty_set)?;
 
@@ -1135,7 +1139,7 @@ impl Repository {
 
         let global_filter = [AsRef::<Path>::as_ref("").to_path_buf()];
 
-        let empty_set = HashSet::new();
+        let empty_set = AHashSet::new();
 
         let ignores = self.get_ignores(options)?;
 

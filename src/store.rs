@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
     path::PathBuf,
 };
 
+use ahash::{AHashMap, AHashSet};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, instrument, trace};
@@ -220,10 +220,10 @@ impl Store {
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn check<T: AsRef<[Hash]>>(
         &self,
-        found: HashSet<Hash>,
+        found: AHashSet<Hash>,
         required: T,
-        dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
-    ) -> Result<HashSet<Hash>, EvsError> {
+        dependency_info: Option<&mut Option<AHashMap<Hash, usize>>>,
+    ) -> Result<AHashSet<Hash>, EvsError> {
         debug!("Store::check(self, <{} hash(es)>)", required.as_ref().len());
 
         self.check_(found, required.as_ref(), dependency_info)
@@ -231,13 +231,13 @@ impl Store {
 
     fn check_(
         &self,
-        mut found: HashSet<Hash>,
+        mut found: AHashSet<Hash>,
         required: impl AsRef<[Hash]>,
-        dependency_info: Option<&mut Option<HashMap<Hash, usize>>>,
-    ) -> Result<HashSet<Hash>, EvsError> {
+        dependency_info: Option<&mut Option<AHashMap<Hash, usize>>>,
+    ) -> Result<AHashSet<Hash>, EvsError> {
         let (mut required, mut dependencies) = {
-            let mut hm = HashSet::new();
-            let mut dep = HashMap::new();
+            let mut hm = AHashSet::new();
+            let mut dep = AHashMap::new();
 
             for r in required.as_ref() {
                 hm.insert(*r);

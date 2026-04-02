@@ -121,6 +121,7 @@ evs checkout HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [ ] Custom partial canonicalize
+- [ ] rustfmt.toml
 - [ ] Store rewrite with content handle and separate serialization and data for blobs
 - [ ] Different completion for commit hashes
 - [ ] `gc --soft` or `gc --hard` or `gc --force`
