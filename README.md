@@ -110,29 +110,22 @@ evs checkout HEAD
 - [x] `evs diff`
 - [x] `.evsignore`
 - [x] `evs status`
-- [x] Better object printing
 - [x] Globbing in `.evsignore`
-- [x] Better logging (possibly tracing)
-- [x] Make confirmation a macro
 - [x] `evs show`
-- [x] Make it cross platform by making paths be utf8 only
+- [x] Cross platform by making paths be utf8 only
 - [x] `evs checkout`
-- [x] Use clippy
 - [x] Shell completions
 - [x] Nix flake
-- [x] Custom partial canonicalize
-- [x] rustfmt.toml
-- [ ] Store rewrite with content handle and separate serialization and data for blobs
-- [ ] `gc --soft` or `gc --hard` or `gc --force` and generally better `gc` and `check`
-- [ ] Different completion for commit hashes
 - [ ] `commit --amend`
 - [ ] Ignores file overrides
 - [ ] More documentation (+ better man pages?)
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs
+- [ ] `add --patch`
+- [ ] `commit --add` and `commit --patch`
 - [ ] Merge tools for evs
 - [ ] Configuration
-- [ ] Diff speedup and `--patch`
 - [ ] Tests
+- [ ] Store rewrite with content handle and separate serialization and data for blobs with `check --soft`
 - [ ] ...

@@ -268,15 +268,14 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn check(&self) -> Result<(), EvsError> {
+    pub fn check(
+        &self,
+        all: bool,
+    ) -> Result<(), EvsError> {
         debug!("Repository::check(self)");
 
         self.store
-            .check::<&[Hash]>(
-                AHashSet::new(),
-                &[self.info.head(), self.info.stage()],
-                None,
-            )
+            .check::<&[Hash]>(AHashSet::new(), &self.gc_roots(), all)
             .map(|_| ())
     }
 
@@ -793,106 +792,19 @@ impl Repository {
     ) -> Result<(), EvsError> {
         debug!("Repository::gc(self)");
 
-        let mut dependencies = None;
+        let (_, extra) = self
+            .store
+            .check::<&[Hash]>(AHashSet::new(), &self.gc_roots(), true)?;
 
-        self.store.check::<&[Hash]>(
-            AHashSet::new(),
-            &[self.info.head(), self.info.stage()],
-            Some(&mut dependencies),
-        )?;
+        trace!("Checked store and obtained {} extras.", extra.len());
 
-        let dependencies = dependencies.as_mut().unwrap();
-
-        trace!(
-            "Checked store and obtained {} dependencies.",
-            dependencies.len()
-        );
-
-        let mut deletion_list = vec![];
-
-        let mut tree_count: usize = 0;
-        let mut commit_count: usize = 0;
-        let mut blob_count: usize = 0;
-
-        while let Some((k, _)) = dependencies.iter().find(|(_, v)| **v == 0) {
-            let k = *k;
-
-            deletion_list.push(k);
-
-            dependencies.remove(&k);
-
-            let hash_display = format!("{}", HashDisplay(&k));
-
-            trace!("Adding \"{}\" to the deletion list.", hash_display);
-
-            match self.store.lookup(&hash_display)?.1 {
-                Object::Null => (),
-                Object::Blob(_) => {
-                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
-                    {
-                        blob_count += 1;
-                    }
-                }
-                Object::Tree(items) => {
-                    for item in items {
-                        trace!("Decrementing rc for \"{}\".", HashDisplay(&item.content));
-
-                        dependencies.insert(
-                            item.content,
-                            dependencies
-                                .get(&item.content)
-                                .unwrap_or(&1)
-                                .saturating_sub(1),
-                        );
-                    }
-
-                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
-                    {
-                        tree_count += 1;
-                    }
-                }
-                Object::Commit(commit) => {
-                    trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.tree));
-
-                    dependencies.insert(
-                        commit.tree,
-                        dependencies
-                            .get(&commit.tree)
-                            .unwrap_or(&1)
-                            .saturating_sub(1),
-                    );
-
-                    trace!("Decrementing rc for \"{}\".", HashDisplay(&commit.parent));
-
-                    dependencies.insert(
-                        commit.parent,
-                        dependencies
-                            .get(&commit.parent)
-                            .unwrap_or(&1)
-                            .saturating_sub(1),
-                    );
-
-                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
-                    {
-                        commit_count += 1;
-                    }
-                }
-            }
-        }
-
-        if !deletion_list.is_empty() {
-            println!(
-                "This will delete {} object(s): ({} commit(s), {} tree(s), {} blob(s))",
-                deletion_list.len(),
-                commit_count,
-                tree_count,
-                blob_count
-            );
+        if !extra.is_empty() {
+            println!("This will delete {} object(s)", extra.len(),);
 
             if confirmation!(true, "Are you sure?")? {
-                warn!("Deleting {} object(s)...", deletion_list.len());
+                warn!("Deleting {} object(s)...", extra.len());
 
-                for item in deletion_list {
+                for item in extra {
                     trace!("Deleting {}", HashDisplay(&item));
 
                     self.store.remove(item)?;
@@ -1295,6 +1207,12 @@ impl Repository {
         trace!("Checkout complete.");
 
         Ok(hash)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn gc_roots(&self) -> Vec<Hash> {
+        vec![self.info.head(), self.info.stage()]
     }
 }
 

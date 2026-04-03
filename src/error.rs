@@ -10,6 +10,7 @@ use std::{
     str::Utf8Error,
 };
 
+use ahash::AHashSet;
 use glob::PatternError;
 use rmp_serde::{decode, encode};
 
@@ -132,7 +133,7 @@ pub enum CorruptState {
         <<PartialHash<'static> as Deref>::Target as ToOwned>::Owned,
     ),
     InvalidCompression(PathBuf, io::Error),
-    MissingObjects(Hash, usize),
+    MissingObjects(AHashSet<Hash>),
     InvalidObjectContent(Hash, decode::Error),
     NonContentInTree(Hash, Hash, &'static str),
 }
@@ -159,12 +160,14 @@ impl Display for CorruptState {
             CorruptState::InvalidCompression(pb, err) => {
                 write!(f, "Path {:?} is compressed incorrectly: {}", pb, err)
             }
-            CorruptState::MissingObjects(first, rest) => {
+            CorruptState::MissingObjects(set) => {
+                let mut iter = set.iter();
+
                 write!(
                     f,
                     "Object \"{}\" (+{} more) is missing",
-                    HashDisplay(first),
-                    rest
+                    HashDisplay(iter.next().unwrap()),
+                    iter.count(),
                 )
             }
             CorruptState::InvalidObjectContent(hash, err) => {

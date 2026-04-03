@@ -5,10 +5,10 @@ use std::{
     path::PathBuf,
 };
 
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashSet;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest as _, Sha256};
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::{
     error::{CorruptState, EvsError},
@@ -149,7 +149,7 @@ impl Store {
         if size_of_val(id) == FORMATTED_HASH_SIZE {
             let path = self.path.join(id);
 
-            target = fs::exists(&path).is_ok().then_some(path);
+            target = fs::exists(&path).is_ok_and(|e| e).then_some(path);
         } else {
             for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
                 let obj = obj.map_err(|e| (e, self.path.clone()))?;
@@ -231,47 +231,41 @@ impl Store {
         &self,
         found: AHashSet<Hash>,
         required: T,
-        dependency_info: Option<&mut Option<AHashMap<Hash, usize>>>,
-    ) -> Result<AHashSet<Hash>, EvsError> {
+        all: bool,
+    ) -> Result<(AHashSet<Hash>, AHashSet<Hash>), EvsError> {
         debug!("Store::check(self, <{} hash(es)>)", required.as_ref().len());
 
-        self.check_(found, required.as_ref(), dependency_info)
+        self.check_(found, required.as_ref(), all)
     }
 
     fn check_(
         &self,
         mut found: AHashSet<Hash>,
-        required: impl AsRef<[Hash]>,
-        dependency_info: Option<&mut Option<AHashMap<Hash, usize>>>,
-    ) -> Result<AHashSet<Hash>, EvsError> {
-        let (mut required, mut dependencies) = {
-            let mut hm = AHashSet::new();
-            let mut dep = AHashMap::new();
+        required: &[Hash],
+        all: bool,
+    ) -> Result<(AHashSet<Hash>, AHashSet<Hash>), EvsError> {
+        let mut required = required.to_vec();
+        let mut extra = AHashSet::new();
+        let mut missing = AHashSet::new();
 
-            for r in required.as_ref() {
-                hm.insert(*r);
-                dep.insert(*r, 1);
-            }
-
-            (hm, dep)
-        };
+        let mut found_cache = AHashSet::new();
 
         trace!("Initially required to find {} object(s).", required.len());
 
-        for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
-            let obj = obj.map_err(|e| (e, self.path.clone()))?;
+        while let Some(obj) = required.pop() {
+            let name = format!("{}", HashDisplay(&obj));
 
-            let name = obj.file_name();
+            let (hash, obj) = match self.lookup(&name) {
+                Ok(res) => res,
+                Err(EvsError::ObjectNotInStore(_)) => {
+                    warn!("Missing \"{}\"", name);
+                    missing.insert(obj);
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
 
-            let bytes = name.as_encoded_bytes();
-
-            if size_of_val(bytes) != FORMATTED_HASH_SIZE || name.to_str().is_none() {
-                return Err(EvsError::CorruptStateDetected(
-                    CorruptState::InvalidObjectName(name),
-                ));
-            }
-
-            let (hash, obj) = self.lookup(name.to_str().unwrap())?;
+            found_cache.insert(name);
 
             trace!("Validated \"{}\".", HashDisplay(&hash));
 
@@ -288,15 +282,7 @@ impl Store {
                             HashDisplay(&hash)
                         );
 
-                        required.insert(item.content);
-                        #[allow(
-                            clippy::arithmetic_side_effects,
-                            reason = "Never going to happen."
-                        )]
-                        dependencies.insert(
-                            item.content,
-                            dependencies.get(&item.content).unwrap_or(&0) + 1,
-                        );
+                        required.push(item.content);
                     }
                 }
                 Object::Commit(commit) => {
@@ -312,12 +298,7 @@ impl Store {
                         HashDisplay(&hash)
                     );
 
-                    required.insert(commit.tree);
-                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
-                    dependencies.insert(
-                        commit.tree,
-                        dependencies.get(&commit.tree).unwrap_or(&0) + 1,
-                    );
+                    required.push(commit.tree);
 
                     trace!(
                         "Requiring \"{}\" for \"{}\".",
@@ -325,45 +306,63 @@ impl Store {
                         HashDisplay(&hash)
                     );
 
-                    required.insert(commit.parent);
-                    #[allow(clippy::arithmetic_side_effects, reason = "Never going to happen.")]
-                    dependencies.insert(
-                        commit.parent,
-                        dependencies.get(&commit.parent).unwrap_or(&0) + 1,
-                    );
+                    required.push(commit.parent);
                 }
             }
 
             found.insert(hash);
         }
 
-        let unnecessary_count = found
-            .difference(&required)
-            .map(|n| dependencies.insert(*n, 0))
-            .count();
+        if all {
+            for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
+                let obj = obj.map_err(|e| (e, self.path.clone()))?;
+
+                let name = obj.file_name();
+
+                let bytes = name.as_encoded_bytes();
+
+                if size_of_val(bytes) != FORMATTED_HASH_SIZE || name.to_str().is_none() {
+                    return Err(EvsError::CorruptStateDetected(
+                        CorruptState::InvalidObjectName(name),
+                    ));
+                }
+
+                let name = name.to_str().unwrap();
+
+                if found_cache.contains(name) {
+                    continue;
+                }
+
+                let (hash, _) = self.lookup(name)?;
+
+                trace!("Validated extra \"{}\".", name);
+
+                found.insert(hash);
+                extra.insert(hash);
+            }
+        }
+
+        let normal_found = found.difference(&extra).count();
+        #[allow(
+            clippy::arithmetic_side_effects,
+            reason = "Not going to happen + impossible."
+        )]
+        let normal_total = normal_found + missing.len();
 
         trace!(
             "Finished validating {}/{} (+{}) objects.",
-            required.intersection(&found).count(),
-            required.len(),
-            unnecessary_count,
+            normal_found,
+            normal_total,
+            extra.len(),
         );
 
-        let mut missing = required.difference(&found).copied();
-
-        if let Some(first) = missing.next() {
+        if !missing.is_empty() {
             return Err(EvsError::CorruptStateDetected(
-                CorruptState::MissingObjects(first, missing.count()),
+                CorruptState::MissingObjects(missing),
             ));
         }
 
-        if let Some(dependency_info) = dependency_info {
-            trace!("Storing dependency info.");
-
-            let _ = dependency_info.insert(dependencies);
-        }
-
-        Ok(found)
+        Ok((found, extra))
     }
 
     #[inline]

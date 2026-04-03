@@ -55,7 +55,11 @@ pub enum Commands {
         path: Option<PathBuf>,
     },
     /// Checks the evs store for validity and completeness.
-    Check,
+    Check {
+        /// Whether to check all objects in the store or only the required ones.
+        #[arg(short, long, default_value_t = false)]
+        all: bool,
+    },
     /// Prints the given object from the store.
     Cat {
         /// Prints the raw bytes of an object in msgpack format.
@@ -232,10 +236,10 @@ impl Cli {
 
                 println!("Repository initialized successfully.");
             }
-            Commands::Check => {
+            Commands::Check { all } => {
                 let repo = get_repo!();
 
-                repo.check()?;
+                repo.check(*all)?;
 
                 drop(repo);
 
