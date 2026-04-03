@@ -36,7 +36,10 @@ pub enum Object {
 
 impl Display for Object {
     #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> fmt::Result {
         match self {
             Object::Null => write!(f, "Null object :)"),
             Object::Blob(items) => write!(f, "Blob:\n{}", items.deref().escape_ascii()),

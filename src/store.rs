@@ -29,7 +29,10 @@ pub struct HashDisplay<'a>(pub PartialHash<'a>);
 
 impl Display for HashDisplay<'_> {
     #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> fmt::Result {
         for el in self.0 {
             write!(f, "{:02x}", el)?;
         }
@@ -59,7 +62,10 @@ impl Store {
     /// Assumes a valid store and might cause unintended behaviour
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn insert(&self, mut obj: Object) -> Result<Hash, EvsError> {
+    pub fn insert(
+        &self,
+        mut obj: Object,
+    ) -> Result<Hash, EvsError> {
         debug!("Store::insert(self, ...)");
 
         if let Object::Tree(entries) = &mut obj {
@@ -118,7 +124,10 @@ impl Store {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn lookup(&self, id: &str) -> Result<(Hash, Object), EvsError> {
+    pub fn lookup(
+        &self,
+        id: &str,
+    ) -> Result<(Hash, Object), EvsError> {
         if size_of_val(id) > FORMATTED_HASH_SIZE {
             debug!("Store::lookup(self, <overlength hash>)");
 
@@ -359,7 +368,10 @@ impl Store {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn remove(&self, path: Hash) -> Result<(), EvsError> {
+    pub fn remove(
+        &self,
+        path: Hash,
+    ) -> Result<(), EvsError> {
         debug!("Store::remove(self, \"{}\")", HashDisplay(&path));
 
         let path = self.path.join(format!("{}", HashDisplay(&path)));
@@ -373,7 +385,10 @@ impl Store {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn resolve_rest(&self, r#ref: String) -> Result<String, EvsError> {
+    pub fn resolve_rest(
+        &self,
+        r#ref: String,
+    ) -> Result<String, EvsError> {
         debug!("Store::resolve_rest(self, \"{}\")", r#ref);
 
         let mut target = None;

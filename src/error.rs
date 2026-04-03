@@ -39,7 +39,10 @@ pub enum EvsError {
 
 impl Display for EvsError {
     #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> fmt::Result {
         match self {
             EvsError::IOError(err, pb) => write!(f, "IO Error on {:?}: {}", pb, err),
             EvsError::MissingRepository(pb) => write!(f, "No repository found at`{:?}", pb),
@@ -136,7 +139,10 @@ pub enum CorruptState {
 
 impl Display for CorruptState {
     #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> fmt::Result {
         match self {
             CorruptState::MissingPath(pb) => write!(f, "Path {:?} is missing", pb),
             CorruptState::DirectoryIsFile(pb) => write!(f, "Path {:?} should be a directory", pb),

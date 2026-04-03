@@ -36,13 +36,19 @@ pub struct Repository {
 impl Repository {
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn open<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
+    pub fn open<T: AsRef<Path>>(
+        path: T,
+        options: &Cli,
+    ) -> Result<Repository, EvsError> {
         debug!("Repository::open({:?})", path.as_ref());
 
         Self::open_(path.as_ref(), options)
     }
 
-    fn open_(path: &Path, _options: &Cli) -> Result<Repository, EvsError> {
+    fn open_(
+        path: &Path,
+        _options: &Cli,
+    ) -> Result<Repository, EvsError> {
         let _ = path.read_dir().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Workspace exists and is a directory.");
@@ -135,13 +141,19 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn create<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
+    pub fn create<T: AsRef<Path>>(
+        path: T,
+        options: &Cli,
+    ) -> Result<Repository, EvsError> {
         debug!("Repository::create(self, {:?})", path.as_ref());
 
         Self::create_(path.as_ref(), options)
     }
 
-    fn create_(path: &Path, _options: &Cli) -> Result<Repository, EvsError> {
+    fn create_(
+        path: &Path,
+        _options: &Cli,
+    ) -> Result<Repository, EvsError> {
         let _ = path.read_dir().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Workspace exists and is a directory.");
@@ -216,13 +228,19 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn find<T: AsRef<Path>>(path: T, options: &Cli) -> Result<Repository, EvsError> {
+    pub fn find<T: AsRef<Path>>(
+        path: T,
+        options: &Cli,
+    ) -> Result<Repository, EvsError> {
         debug!("Repository::find({:?})", path.as_ref());
 
         Self::find_(path.as_ref(), options)
     }
 
-    fn find_(path: &Path, options: &Cli) -> Result<Repository, EvsError> {
+    fn find_(
+        path: &Path,
+        options: &Cli,
+    ) -> Result<Repository, EvsError> {
         let mut path = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path.");
@@ -364,13 +382,19 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn sub<T: AsRef<Path>>(&mut self, path: T) -> Result<(), EvsError> {
+    pub fn sub<T: AsRef<Path>>(
+        &mut self,
+        path: T,
+    ) -> Result<(), EvsError> {
         debug!("Repository::sub(self, {:?})", path.as_ref());
 
         self.sub_(path.as_ref())
     }
 
-    fn sub_(&mut self, path: &Path) -> Result<(), EvsError> {
+    fn sub_(
+        &mut self,
+        path: &Path,
+    ) -> Result<(), EvsError> {
         let canon = partial_canonicalize(path).map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
@@ -624,7 +648,10 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn lookup<T: AsRef<str>>(&self, r#ref: T) -> Result<(Hash, Object), EvsError> {
+    pub fn lookup<T: AsRef<str>>(
+        &self,
+        r#ref: T,
+    ) -> Result<(Hash, Object), EvsError> {
         debug!("Repository::lookup(self, \"{}\")", r#ref.as_ref());
 
         let resolved = self.resolve(r#ref)?;
@@ -715,13 +742,19 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn resolve<T: AsRef<str>>(&self, r#ref: T) -> Result<String, EvsError> {
+    pub fn resolve<T: AsRef<str>>(
+        &self,
+        r#ref: T,
+    ) -> Result<String, EvsError> {
         debug!("Repository::resolve(self, \"{}\")", r#ref.as_ref());
 
         self.resolve_(r#ref.as_ref())
     }
 
-    fn resolve_(&self, r#ref: &str) -> Result<String, EvsError> {
+    fn resolve_(
+        &self,
+        r#ref: &str,
+    ) -> Result<String, EvsError> {
         let (first, back_count) = r#ref.split_once('~').unwrap_or((r#ref, "0"));
 
         let back_count = back_count
@@ -754,7 +787,10 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn gc(&self, _options: &Cli) -> Result<(), EvsError> {
+    pub fn gc(
+        &self,
+        _options: &Cli,
+    ) -> Result<(), EvsError> {
         debug!("Repository::gc(self)");
 
         let mut dependencies = None;
@@ -869,7 +905,10 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn get_tree(&self, commit: Hash) -> Result<Hash, EvsError> {
+    pub fn get_tree(
+        &self,
+        commit: Hash,
+    ) -> Result<Hash, EvsError> {
         debug!("Repository::get_tree(self, \"{}\")", HashDisplay(&commit));
 
         let (hash, commit) = self.store.lookup(&format!("{}", HashDisplay(&commit)))?;
@@ -885,7 +924,10 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn get_ignores(&self, _options: &Cli) -> Result<Vec<Pattern>, EvsError> {
+    pub fn get_ignores(
+        &self,
+        _options: &Cli,
+    ) -> Result<Vec<Pattern>, EvsError> {
         debug!("Repository::get_ignores(self)");
 
         let ignores_file = self.workspace.join(".evsignore");
@@ -914,7 +956,10 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn status(&self, options: &Cli) -> Result<(), EvsError> {
+    pub fn status(
+        &self,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         debug!("Repository::status(self)");
 
         let (store_count, store_size) = self.store.status()?;
@@ -1056,13 +1101,21 @@ impl Repository {
 
     #[inline]
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn show<T: AsRef<str>>(&self, r#ref: T, options: &Cli) -> Result<(), EvsError> {
+    pub fn show<T: AsRef<str>>(
+        &self,
+        r#ref: T,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         debug!("Repository::show(self, \"{}\")", r#ref.as_ref());
 
         self.show_(r#ref.as_ref(), options)
     }
 
-    fn show_(&self, r#ref: &str, options: &Cli) -> Result<(), EvsError> {
+    fn show_(
+        &self,
+        r#ref: &str,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
         let (hash, commit) = self.lookup(r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
@@ -1102,7 +1155,12 @@ impl Repository {
         self.checkout_(r#ref.as_ref(), force, options)
     }
 
-    fn checkout_(&mut self, r#ref: &str, force: bool, options: &Cli) -> Result<Hash, EvsError> {
+    fn checkout_(
+        &mut self,
+        r#ref: &str,
+        force: bool,
+        options: &Cli,
+    ) -> Result<Hash, EvsError> {
         let (hash, _) = self.lookup(r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
@@ -1279,7 +1337,10 @@ impl RepositoryInfo {
     }
 
     #[inline]
-    pub fn set_head(&mut self, new_head: Hash) {
+    pub fn set_head(
+        &mut self,
+        new_head: Hash,
+    ) {
         self.modified = self.head != new_head;
         self.head = new_head;
     }
@@ -1291,7 +1352,10 @@ impl RepositoryInfo {
     }
 
     #[inline]
-    pub fn set_stage(&mut self, new_stage: Hash) {
+    pub fn set_stage(
+        &mut self,
+        new_stage: Hash,
+    ) {
         self.modified = self.stage != new_stage;
         self.stage = new_stage;
     }

@@ -25,7 +25,10 @@ macro_rules! confirmation {
 
 #[inline]
 #[instrument(level = "debug", err(level = "debug"), skip_all)]
-pub fn confirmation_impl(prompt: Arguments, default: bool) -> Result<bool, EvsError> {
+pub fn confirmation_impl(
+    prompt: Arguments,
+    default: bool,
+) -> Result<bool, EvsError> {
     let yn = if default { "[Y/n]" } else { "[y/N]" };
 
     debug!("confirmation(\"{}\", {})", prompt, yn);
@@ -75,7 +78,10 @@ pub struct SizeDisplay(pub usize, pub bool);
 
 impl Display for SizeDisplay {
     #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> fmt::Result {
         match self.0 {
             0..1_000 => write!(f, "{}{}B{}", ADD_COLOR, self.0, NONE_COLOR),
             1_000..1_000_000 => write!(
