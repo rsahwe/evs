@@ -613,6 +613,7 @@ impl Repository {
     #[instrument(level = "debug", err(level = "debug"), skip_all)]
     pub fn commit(
         &mut self,
+        amend_parent: Option<Hash>,
         message: String,
         name: String,
         email: String,
@@ -628,7 +629,7 @@ impl Repository {
         );
 
         let commit = self.store.insert(Object::Commit(Commit {
-            parent: self.info.head(),
+            parent: amend_parent.unwrap_or(self.info.head()),
             name,
             email,
             tree: self.info.stage(),

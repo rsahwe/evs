@@ -25,7 +25,7 @@ pub enum EvsError {
     RepositoryLocked(TryLockError, PathBuf),
     ObjectNotInStore(String),
     AmbiguousObject(String, OsString),
-    RepositoryInfoCorrupt(decode::Error),
+    RepositoryInfoCorrupt(decode::Error), //TODO: MOVE TO CorruptState
     PathOutsideOfRepo(PathBuf),
     PathNotInStage(PathBuf),
     IntegerParseError(ParseIntError),
@@ -36,6 +36,7 @@ pub enum EvsError {
     PathError(Utf8Error, Vec<u8>),
     UncommittedChanges,
     EncoderFailed(encode::Error),
+    MissingCommitInfo(&'static str),
 }
 
 impl Display for EvsError {
@@ -81,6 +82,7 @@ impl Display for EvsError {
             }
             EvsError::UncommittedChanges => write!(f, "There are uncommitted changes"),
             EvsError::EncoderFailed(err) => unreachable!("The encoder failed: {}", err),
+            EvsError::MissingCommitInfo(info) => write!(f, "Missing {} to create a commit", info),
         }
     }
 }
@@ -136,6 +138,7 @@ pub enum CorruptState {
     MissingObjects(AHashSet<Hash>),
     InvalidObjectContent(Hash, decode::Error),
     NonContentInTree(Hash, Hash, &'static str),
+    HeadIsNotACommit,
 }
 
 impl Display for CorruptState {
@@ -182,6 +185,7 @@ impl Display for CorruptState {
                     r#type
                 )
             }
+            CorruptState::HeadIsNotACommit => write!(f, "HEAD is not a commit"),
         }
     }
 }

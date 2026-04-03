@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     io::{Write as _, stdout},
     path::{Path, PathBuf},
     time::SystemTime,
@@ -13,7 +14,8 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitEx
 
 use crate::{
     diff::DiffSide,
-    error::EvsError,
+    error::{CorruptState, EvsError},
+    objects::Object,
     repo::Repository,
     store::HashDisplay,
     util::{get_color, partial_canonicalize, repo_ref_completer},
@@ -83,15 +85,18 @@ pub enum Commands {
     },
     /// Commits the current stage to the commit chain.
     Commit {
+        /// Whether to modify the previous commit instead of creating a new one or not.
+        #[arg(long)]
+        amend: bool,
         /// The commit message, currently not optional.
         #[arg(short, long, value_hint(ValueHint::Other))]
-        message: String,
+        message: Option<String>,
         /// The committer name, currently not optional.
         #[arg(short, long, value_hint(ValueHint::Username))]
-        name: String,
+        name: Option<String>,
         /// The committer email, currently not optional.
         #[arg(short, long, value_hint(ValueHint::Other))]
-        email: String,
+        email: Option<String>,
     },
     /// Prints the commit log of a commit.
     Log {
@@ -297,6 +302,7 @@ impl Cli {
                 info!("Finished removing.");
             }
             Commands::Commit {
+                amend,
                 message,
                 name,
                 email,
@@ -304,6 +310,39 @@ impl Cli {
                 let mut repo = get_repo!();
 
                 let time = SystemTime::now();
+
+                let mut message = message.as_ref().map(Cow::Borrowed);
+                let mut name = name.as_ref().map(Cow::Borrowed);
+                let mut email = email.as_ref().map(Cow::Borrowed);
+
+                let mut amend_parent = None;
+
+                if *amend {
+                    let (_, Object::Commit(commit)) = repo.lookup("HEAD")? else {
+                        return Err(EvsError::CorruptStateDetected(
+                            CorruptState::HeadIsNotACommit,
+                        ));
+                    };
+
+                    trace!("Amending with {:?}", commit);
+
+                    message.get_or_insert(Cow::Owned(commit.msg));
+                    name.get_or_insert(Cow::Owned(commit.name));
+                    email.get_or_insert(Cow::Owned(commit.email));
+                    amend_parent = Some(commit.parent);
+                }
+
+                let Some(name) = name else {
+                    return Err(EvsError::MissingCommitInfo("committer name"));
+                };
+
+                let Some(email) = email else {
+                    return Err(EvsError::MissingCommitInfo("commiter email"));
+                };
+
+                let Some(message) = message else {
+                    return Err(EvsError::MissingCommitInfo("commit message"));
+                };
 
                 trace!(
                     "Committing by {} <{}> at {:?} with message of length {}",
@@ -314,9 +353,10 @@ impl Cli {
                 );
 
                 let commit = repo.commit(
-                    message.to_owned(),
-                    name.to_owned(),
-                    email.to_owned(),
+                    amend_parent,
+                    message.into_owned(),
+                    name.into_owned(),
+                    email.into_owned(),
                     time,
                     &self,
                 )?;

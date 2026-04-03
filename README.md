@@ -116,7 +116,7 @@ evs checkout HEAD
 - [x] `evs checkout`
 - [x] Shell completions
 - [x] Nix flake
-- [ ] `commit --amend`
+- [x] `commit --amend`
 - [ ] Ignores file overrides
 - [ ] More documentation (+ better man pages?)
 - [ ] Branch tools for evs
@@ -128,4 +128,5 @@ evs checkout HEAD
 - [ ] Configuration
 - [ ] Tests
 - [ ] Store rewrite with content handle and separate serialization and data for blobs with `check --soft`
+- [ ] Separate completion for commit hashes
 - [ ] ...
