@@ -1,5 +1,5 @@
 use std::{
-    env::var_os,
+    env::{current_dir, var_os},
     ffi::OsStr,
     fmt::{self, Arguments, Display, Formatter},
     io::{self, BufRead as _, ErrorKind, IsTerminal as _, Write as _, stdin, stdout},
@@ -165,7 +165,9 @@ pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 pub fn partial_canonicalize<T: AsRef<Path>>(path: T) -> io::Result<PathBuf> {
     debug!("partial_canonicalize({:?})", path.as_ref());
 
-    let path = path.as_ref();
+    let path = current_dir()?.join(path.as_ref());
+
+    trace!("Using path {:?}.", path);
 
     for ancestor in path.ancestors() {
         if let Ok(real_ancestor) = ancestor.canonicalize() {
@@ -199,23 +201,5 @@ pub fn partial_canonicalize<T: AsRef<Path>>(path: T) -> io::Result<PathBuf> {
         }
     }
 
-    trace!("No ancestor found.");
-
-    if path
-        .components()
-        .find(|c| {
-            matches!(
-                c,
-                path::Component::ParentDir | path::Component::RootDir | path::Component::Prefix(_)
-            )
-        })
-        .is_some()
-    {
-        return Err(io::Error::new(
-            ErrorKind::InvalidFilename,
-            "cannot predict canonical form of ambiguous file path",
-        ));
-    }
-
-    absolute(path)
+    unreachable!("An absolute path always has an ancestor.")
 }

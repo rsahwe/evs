@@ -123,7 +123,7 @@ evs checkout HEAD
 - [x] Custom partial canonicalize
 - [ ] rustfmt.toml
 - [ ] Store rewrite with content handle and separate serialization and data for blobs
-- [ ] `gc --soft` or `gc --hard` or `gc --force`
+- [ ] `gc --soft` or `gc --hard` or `gc --force` and generally better `gc` and `check`
 - [ ] Different completion for commit hashes
 - [ ] `commit --amend`
 - [ ] Ignores file overrides
