@@ -3,6 +3,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
     path::PathBuf,
+    thread,
 };
 
 use ahash::AHashSet;
@@ -101,20 +102,31 @@ impl Store {
         let target = self.path.join(&hash_display);
 
         if target.exists() {
-            trace!("Object path exists! TODO: Maybe figure out strategy for this.");
+            trace!("Object path exists, assuming it is valid.");
 
             Ok(hash)
         } else {
             trace!("Object path does not exist, inserting...");
 
+            let tmp = self
+                .path
+                .join(format!("{}-{:?}", hash_display, thread::current().id()));
+
+            trace!("Using temporary path {:?}.", tmp);
+
             let mut file = OpenOptions::new()
-                .create_new(true)
+                .create(true)
                 .write(true)
-                .open(&target)
+                .truncate(true)
+                .open(&tmp)
                 .map_err(|e| (e, target.clone()))?;
 
             file.write_all(&compressed)
                 .map_err(|e| (e, target.clone()))?;
+
+            drop(file);
+
+            fs::rename(tmp, &target).map_err(|e| (e, target.clone()))?;
 
             trace!("Wrote object to store.");
 

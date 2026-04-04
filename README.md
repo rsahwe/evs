@@ -117,8 +117,9 @@ evs checkout HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [x] `commit --amend`
+- [ ] Parallelize `Store::check`, `DiffSide::read` and diffing
 - [ ] Ignores file overrides
-- [ ] More documentation (+ better man pages?)
+- [ ] More documentation (+ better man pages?) + code review of all lines in detail
 - [ ] Branch tools for evs
 - [ ] `evs clone`
 - [ ] Remote tools for evs

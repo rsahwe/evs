@@ -8,6 +8,7 @@ use std::{
 
 use ahash::AHashSet;
 use glob::Pattern;
+use rayon::iter::{ParallelBridge as _, ParallelIterator as _};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, instrument, trace, warn};
 
@@ -567,39 +568,52 @@ impl Repository {
 
             self.store.insert(Object::Blob(content))?
         } else {
-            let mut items = vec![];
+            let items = path
+                .read_dir()
+                .map_err(|e| (e, path.to_owned()))?
+                .par_bridge()
+                .filter_map(|child| {
+                    let name = match child {
+                        Ok(child) => child.file_name(),
+                        Err(e) => return Some(Err((e, path.clone()).into())),
+                    };
 
-            for child in path.read_dir().map_err(|e| (e, path.to_owned()))? {
-                let child = child.map_err(|e| (e, path.to_owned()))?;
+                    let name_bytes = name.as_encoded_bytes().to_owned();
 
-                let name = child.file_name();
+                    let next = path.join(&name);
 
-                let name_bytes = name.as_encoded_bytes().to_owned();
+                    let relative = next.strip_prefix(&self.workspace).unwrap();
 
-                let next = path.join(&name);
+                    if ignores
+                        .iter()
+                        .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
+                        && !overrides.iter().any(|o| o.starts_with(relative))
+                    {
+                        trace!("Filtered child {:?}.", name);
 
-                let relative = next.strip_prefix(&self.workspace).unwrap();
+                        return None;
+                    }
 
-                if ignores
-                    .iter()
-                    .any(|i| relative.ancestors().any(|a| i.matches_path(a)))
-                    && !overrides.iter().any(|o| o.starts_with(relative))
-                {
-                    trace!("Filtered child {:?}.", name);
+                    let hash = match self.hash_dir(&next, ignores, overrides) {
+                        Ok(hash) => hash,
+                        Err(e) => return Some(Err(e)),
+                    };
 
-                    continue;
-                }
+                    trace!("Hashed child {:?}.", name);
 
-                let hash = self.hash_dir(&next, ignores, overrides)?;
+                    let name = match String::from_utf8(name_bytes) {
+                        Ok(name) => name,
+                        Err(e) => {
+                            return Some(Err(EvsError::PathError(e.utf8_error(), e.into_bytes())));
+                        }
+                    };
 
-                trace!("Hashed child {:?}.", name);
-
-                items.push(TreeEntry {
-                    name: String::from_utf8(name_bytes)
-                        .map_err(|e| EvsError::PathError(e.utf8_error(), e.into_bytes()))?,
-                    content: hash,
-                });
-            }
+                    Some(Ok(TreeEntry {
+                        name,
+                        content: hash,
+                    }))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
             trace!("Inserting resulting tree...");
 
