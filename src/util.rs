@@ -8,7 +8,7 @@ use std::{
 
 use clap_complete::CompletionCandidate;
 use glob::glob;
-use tracing::{debug, instrument, trace};
+use tracing::{Span, debug, instrument, trace};
 
 use crate::{
     cli::{Cli, Commands},
@@ -19,13 +19,14 @@ use crate::{
 #[macro_export]
 macro_rules! confirmation {
     ($default:literal, $fmt:literal $($arg:tt)*) => {
-        $crate::util::confirmation_impl(format_args!($fmt $($arg)*), $default)
+        $crate::util::confirmation_impl(&::tracing::Span::current(), format_args!($fmt $($arg)*), $default)
     };
 }
 
 #[inline]
-#[instrument(level = "debug", err(level = "debug"), skip_all)]
+#[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
 pub fn confirmation_impl(
+    parent: &Span,
     prompt: Arguments,
     default: bool,
 ) -> Result<bool, EvsError> {
@@ -133,7 +134,7 @@ pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
         command: Commands::Completion,
     };
 
-    let Ok(repo) = Repository::find(".", &cli) else {
+    let Ok(repo) = Repository::find(&Span::current(), ".", &cli) else {
         return Vec::new();
     };
 
@@ -167,8 +168,11 @@ pub fn repo_ref_completer(current: &OsStr) -> Vec<CompletionCandidate> {
 }
 
 #[inline]
-#[instrument(level = "debug", err(level = "debug"), skip_all)]
-pub fn partial_canonicalize<T: AsRef<Path>>(path: T) -> io::Result<PathBuf> {
+#[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
+pub fn partial_canonicalize<T: AsRef<Path>>(
+    parent: &Span,
+    path: T,
+) -> io::Result<PathBuf> {
     debug!("partial_canonicalize({:?})", path.as_ref());
 
     let path = current_dir()?.join(path.as_ref());

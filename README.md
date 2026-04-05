@@ -117,7 +117,8 @@ evs checkout HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [x] `commit --amend`
-- [ ] Parallelize `Store::check`, `DiffSide::read` and diffing
+- [ ] Parallelize diffing
+- [ ] Undo stage (`sub --unstage` or maybe probably `sub --delete`)
 - [ ] Ignores file overrides
 - [ ] More documentation (+ better man pages?) + code review of all lines in detail
 - [ ] Branch tools for evs
@@ -128,6 +129,6 @@ evs checkout HEAD
 - [ ] Merge tools for evs
 - [ ] Configuration
 - [ ] Tests
-- [ ] Store rewrite with content handle and separate serialization and data for blobs with `check --soft`
+- [ ] Store rewrite with content handle and separate serialization and data for blobs with `check --soft` (deserialization is a performance problem apparently (for blobs specifically))
 - [ ] Separate completion for commit hashes
 - [ ] ...

@@ -10,7 +10,7 @@ use ahash::AHashSet;
 use glob::Pattern;
 use rayon::iter::{ParallelBridge as _, ParallelIterator as _};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{Span, debug, error, instrument, trace, warn};
 
 use crate::{
     cli::Cli,
@@ -36,8 +36,9 @@ pub struct Repository {
 
 impl Repository {
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn open<T: AsRef<Path>>(
+        parent: &Span,
         path: T,
         options: &Cli,
     ) -> Result<Repository, EvsError> {
@@ -141,8 +142,9 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn create<T: AsRef<Path>>(
+        parent: &Span,
         path: T,
         options: &Cli,
     ) -> Result<Repository, EvsError> {
@@ -155,6 +157,8 @@ impl Repository {
         path: &Path,
         _options: &Cli,
     ) -> Result<Repository, EvsError> {
+        let current = Span::current();
+
         let _ = path.read_dir().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Workspace exists and is a directory.");
@@ -181,11 +185,11 @@ impl Repository {
 
         let store = Store::new(store);
 
-        let root = store.insert(Object::Null)?;
+        let root = store.insert(&current, Object::Null)?;
 
         trace!("Inserted null object.");
 
-        let empty_stage = store.insert(Object::Tree(vec![]))?;
+        let empty_stage = store.insert(&current, Object::Tree(vec![]))?;
 
         trace!("Inserted empty tree.");
 
@@ -228,8 +232,9 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn find<T: AsRef<Path>>(
+        parent: &Span,
         path: T,
         options: &Cli,
     ) -> Result<Repository, EvsError> {
@@ -242,6 +247,8 @@ impl Repository {
         path: &Path,
         options: &Cli,
     ) -> Result<Repository, EvsError> {
+        let current = Span::current();
+
         let mut path = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path.");
@@ -249,7 +256,7 @@ impl Repository {
         loop {
             trace!("Trying path {:?}:", path);
 
-            match Self::open(&path, options) {
+            match Self::open(&current, &path, options) {
                 Ok(repo) => {
                     trace!("Found repository in {:?}.", path);
 
@@ -268,22 +275,24 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn check(
         &self,
+        parent: &Span,
         all: bool,
     ) -> Result<(), EvsError> {
         debug!("Repository::check(self)");
 
         self.store
-            .check::<&[Hash]>(AHashSet::new(), &self.gc_roots(), all)
+            .check::<&[Hash]>(&Span::current(), AHashSet::new(), &self.gc_roots(), all)
             .map(|_| ())
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn add<T: AsRef<Path>>(
         &mut self,
+        parent: &Span,
         path: T,
         overrides: &AHashSet<PathBuf>,
         options: &Cli,
@@ -303,6 +312,8 @@ impl Repository {
         overrides: &AHashSet<PathBuf>,
         options: &Cli,
     ) -> Result<(), EvsError> {
+        let current = Span::current();
+
         let canon = path.canonicalize().map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
@@ -313,7 +324,7 @@ impl Repository {
 
         let relative = canon.strip_prefix(&self.workspace).unwrap();
 
-        let ignores = self.get_ignores(options)?;
+        let ignores = self.get_ignores(&current, options)?;
 
         trace!("Using ignores: {:?}.", ignores);
 
@@ -334,7 +345,7 @@ impl Repository {
         let hash = if canon.is_dir() {
             let ignores = if is_ignored { &vec![] } else { &ignores };
 
-            let hash = self.hash_dir(&canon, ignores, overrides)?;
+            let hash = self.hash_dir(&current, &canon, ignores, overrides)?;
 
             if relative == "" {
                 trace!("Hashed contents of path.");
@@ -352,21 +363,23 @@ impl Repository {
 
             hash
         } else {
-            self.store.insert(Object::Blob(
-                fs::read(&canon).map_err(|e| (e, canon.clone()))?,
-            ))?
+            self.store.insert(
+                &current,
+                Object::Blob(fs::read(&canon).map_err(|e| (e, canon.clone()))?),
+            )?
         };
 
         trace!("Hashed contents of path.");
 
         let new_stage = match self.update_stage(
+            &current,
             relative.components().peekable(),
             relative,
             Some(hash),
             self.info.stage(),
         )? {
             Some(stage) => stage,
-            None => self.store.insert(Object::Tree(vec![]))?,
+            None => self.store.insert(&current, Object::Tree(vec![]))?,
         };
 
         trace!("Recomputed stage.");
@@ -381,9 +394,10 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn sub<T: AsRef<Path>>(
         &mut self,
+        parent: &Span,
         path: T,
     ) -> Result<(), EvsError> {
         debug!("Repository::sub(self, {:?})", path.as_ref());
@@ -395,7 +409,9 @@ impl Repository {
         &mut self,
         path: &Path,
     ) -> Result<(), EvsError> {
-        let canon = partial_canonicalize(path).map_err(|e| (e, path.to_path_buf()))?;
+        let current = Span::current();
+
+        let canon = partial_canonicalize(&current, path).map_err(|e| (e, path.to_path_buf()))?;
 
         trace!("Canonicalized path to {:?}", canon);
 
@@ -412,16 +428,17 @@ impl Repository {
             .unwrap();
 
         let new_stage = if relative == "" {
-            self.store.insert(Object::Tree(vec![]))?
+            self.store.insert(&current, Object::Tree(vec![]))?
         } else {
             match self.update_stage(
+                &current,
                 relative.components().peekable(),
                 relative,
                 None,
                 self.info.stage(),
             )? {
                 Some(stage) => stage,
-                None => self.store.insert(Object::Tree(vec![]))?,
+                None => self.store.insert(&current, Object::Tree(vec![]))?,
             }
         };
 
@@ -436,14 +453,17 @@ impl Repository {
         Ok(())
     }
 
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     fn update_stage(
         &mut self,
+        parent: &Span,
         mut components: Peekable<Components>,
         path: impl AsRef<Path>,
         obj: Option<Hash>,
         tree: Hash,
     ) -> Result<Option<Hash>, EvsError> {
+        let current = Span::current();
+
         let next = components.next().unwrap();
 
         debug!(
@@ -458,7 +478,10 @@ impl Repository {
 
         let next_bytes = AsRef::<Path>::as_ref(&next).as_os_str().as_encoded_bytes();
 
-        let mut items = match self.store.lookup(&format!("{}", HashDisplay(&tree))) {
+        let mut items = match self
+            .store
+            .lookup(&current, &format!("{}", HashDisplay(&tree)))
+        {
             Ok((_, Object::Tree(items))) => items,
             Ok((hash, _)) => {
                 trace!("Replacing object \"{}\" with new tree.", HashDisplay(&hash));
@@ -479,10 +502,10 @@ impl Repository {
                 if obj.is_none() {
                     return Err(EvsError::PathNotInStage(path.to_path_buf()));
                 }
-                self.store.insert(Object::Tree(vec![]))?
+                self.store.insert(&current, Object::Tree(vec![]))?
             };
 
-            self.update_stage(components, path, obj, next)?
+            self.update_stage(&current, components, path, obj, next)?
         };
 
         trace!("Obtained hash or lack thereof of later component(s).");
@@ -503,7 +526,7 @@ impl Repository {
 
                     trace!("Object changed, adding new tree to store...");
 
-                    Some(self.store.insert(Object::Tree(items))?)
+                    Some(self.store.insert(&current, Object::Tree(items))?)
                 }
             } else {
                 items.push(TreeEntry {
@@ -514,7 +537,7 @@ impl Repository {
 
                 trace!("Tree changed, adding tree to store...");
 
-                Some(self.store.insert(Object::Tree(items))?)
+                Some(self.store.insert(&current, Object::Tree(items))?)
             }
         } else {
             if let Some(index) = items
@@ -533,7 +556,7 @@ impl Repository {
                 } else {
                     trace!("Tree changed, adding tree to store...");
 
-                    Some(self.store.insert(Object::Tree(items))?)
+                    Some(self.store.insert(&current, Object::Tree(items))?)
                 }
             } else {
                 return Err(EvsError::PathNotInStage(path.to_path_buf()));
@@ -545,9 +568,10 @@ impl Repository {
         Ok(hash)
     }
 
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     fn hash_dir(
         &self,
+        parent: &Span,
         path: &PathBuf,
         ignores: impl AsRef<[Pattern]>,
         overrides: &AHashSet<PathBuf>,
@@ -559,6 +583,8 @@ impl Repository {
             overrides
         );
 
+        let current = Span::current();
+
         let ignores = ignores.as_ref();
 
         let res = if !path.is_dir() {
@@ -566,13 +592,15 @@ impl Repository {
 
             trace!("Read blob, inserting...");
 
-            self.store.insert(Object::Blob(content))?
+            self.store.insert(&current, Object::Blob(content))?
         } else {
             let items = path
                 .read_dir()
                 .map_err(|e| (e, path.to_owned()))?
                 .par_bridge()
                 .filter_map(|child| {
+                    let _entered = current.enter();
+
                     let name = match child {
                         Ok(child) => child.file_name(),
                         Err(e) => return Some(Err((e, path.clone()).into())),
@@ -594,7 +622,7 @@ impl Repository {
                         return None;
                     }
 
-                    let hash = match self.hash_dir(&next, ignores, overrides) {
+                    let hash = match self.hash_dir(&current, &next, ignores, overrides) {
                         Ok(hash) => hash,
                         Err(e) => return Some(Err(e)),
                     };
@@ -617,16 +645,18 @@ impl Repository {
 
             trace!("Inserting resulting tree...");
 
-            self.store.insert(Object::Tree(items))?
+            self.store.insert(&current, Object::Tree(items))?
         };
 
         Ok(res)
     }
 
+    #[allow(clippy::too_many_arguments, reason = "Reasonable here.")]
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn commit(
         &mut self,
+        parent: &Span,
         amend_parent: Option<Hash>,
         message: String,
         name: String,
@@ -642,14 +672,17 @@ impl Repository {
             time
         );
 
-        let commit = self.store.insert(Object::Commit(Commit {
-            parent: amend_parent.unwrap_or(self.info.head()),
-            name,
-            email,
-            tree: self.info.stage(),
-            msg: message,
-            date: time,
-        }))?;
+        let commit = self.store.insert(
+            &Span::current(),
+            Object::Commit(Commit {
+                parent: amend_parent.unwrap_or(self.info.head()),
+                name,
+                email,
+                tree: self.info.stage(),
+                msg: message,
+                date: time,
+            }),
+        )?;
 
         trace!("Created and inserted commit object.");
 
@@ -661,24 +694,28 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn lookup<T: AsRef<str>>(
         &self,
+        parent: &Span,
         r#ref: T,
     ) -> Result<(Hash, Object), EvsError> {
         debug!("Repository::lookup(self, \"{}\")", r#ref.as_ref());
 
-        let resolved = self.resolve(r#ref)?;
+        let current = Span::current();
+
+        let resolved = self.resolve(&current, r#ref)?;
 
         trace!("Resolved to \"{}\".", resolved);
 
-        self.store.lookup(resolved.as_str())
+        self.store.lookup(&current, resolved.as_str())
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn log<T: AsRef<str>>(
         &self,
+        parent: &Span,
         r#ref: T,
         limit: usize,
         oneline: bool,
@@ -701,18 +738,20 @@ impl Repository {
         oneline: bool,
         options: &Cli,
     ) -> Result<(), EvsError> {
+        let current = Span::current();
+
         let print_color = get_color(options);
 
         let mod_color = if print_color { MOD_COLOR } else { "" };
         let info_color = if print_color { INFO_COLOR } else { "" };
         let none_color = if print_color { NONE_COLOR } else { "" };
 
-        let mut resolved = self.resolve(r#ref)?;
+        let mut resolved = self.resolve(&current, r#ref)?;
 
         trace!("Resolved to \"{}\".", resolved);
 
         for _ in 0..limit {
-            let (hash, commit) = self.store.lookup(&resolved)?;
+            let (hash, commit) = self.store.lookup(&current, &resolved)?;
 
             match commit {
                 Object::Null => return Ok(()),
@@ -755,9 +794,10 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn resolve<T: AsRef<str>>(
         &self,
+        parent: &Span,
         r#ref: T,
     ) -> Result<String, EvsError> {
         debug!("Repository::resolve(self, \"{}\")", r#ref.as_ref());
@@ -769,6 +809,8 @@ impl Repository {
         &self,
         r#ref: &str,
     ) -> Result<String, EvsError> {
+        let current = Span::current();
+
         let (first, back_count) = r#ref.split_once('~').unwrap_or((r#ref, "0"));
 
         let back_count = back_count
@@ -785,7 +827,7 @@ impl Repository {
         let mut resolved = first;
 
         for _ in 0..back_count {
-            let (hash, commit) = self.store.lookup(resolved.as_str())?;
+            let (hash, commit) = self.store.lookup(&current, resolved.as_str())?;
 
             resolved = match commit {
                 Object::Commit(Commit { parent, .. }) => format!("{}", HashDisplay(&parent)),
@@ -796,20 +838,23 @@ impl Repository {
             trace!("Gone back to \"{}\".", resolved);
         }
 
-        self.store.resolve_rest(resolved)
+        self.store.resolve_rest(&current, resolved)
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn gc(
         &self,
+        parent: &Span,
         _options: &Cli,
     ) -> Result<(), EvsError> {
         debug!("Repository::gc(self)");
 
-        let (_, extra) = self
-            .store
-            .check::<&[Hash]>(AHashSet::new(), &self.gc_roots(), true)?;
+        let current = Span::current();
+
+        let (_, extra) =
+            self.store
+                .check::<&[Hash]>(&current, AHashSet::new(), &self.gc_roots(), true)?;
 
         trace!("Checked store and obtained {} extras.", extra.len());
 
@@ -822,7 +867,7 @@ impl Repository {
                 for item in extra {
                     trace!("Deleting {}", HashDisplay(&item));
 
-                    self.store.remove(item)?;
+                    self.store.remove(&current, item)?;
                 }
             }
         }
@@ -831,28 +876,34 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn get_tree(
         &self,
+        parent: &Span,
         commit: Hash,
     ) -> Result<Hash, EvsError> {
         debug!("Repository::get_tree(self, \"{}\")", HashDisplay(&commit));
 
-        let (hash, commit) = self.store.lookup(&format!("{}", HashDisplay(&commit)))?;
+        let current = Span::current();
+
+        let (hash, commit) = self
+            .store
+            .lookup(&current, &format!("{}", HashDisplay(&commit)))?;
 
         trace!("Found referenced object.");
 
         Ok(match commit {
-            Object::Null => self.store.insert(Object::Tree(vec![]))?,
+            Object::Null => self.store.insert(&current, Object::Tree(vec![]))?,
             Object::Commit(commit) => commit.tree,
             _ => return Err(EvsError::NotACommit(hash)),
         })
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn get_ignores(
         &self,
+        parent: &Span,
         _options: &Cli,
     ) -> Result<Vec<Pattern>, EvsError> {
         debug!("Repository::get_ignores(self)");
@@ -882,14 +933,17 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn status(
         &self,
+        parent: &Span,
         options: &Cli,
     ) -> Result<(), EvsError> {
         debug!("Repository::status(self)");
 
-        let (store_count, store_size) = self.store.status()?;
+        let current = Span::current();
+
+        let (store_count, store_size) = self.store.status(&current)?;
 
         trace!(
             "Store reported {} objects with a collective {} bytes.",
@@ -898,7 +952,7 @@ impl Repository {
 
         let (repo_head, repo_stage) = (self.info.head(), self.info.stage());
 
-        let commit_diffside = DiffSide::Tree(self.get_tree(repo_head)?);
+        let commit_diffside = DiffSide::Tree(self.get_tree(&current, repo_head)?);
 
         let stage_diffside = DiffSide::Tree(repo_stage);
 
@@ -906,17 +960,32 @@ impl Repository {
 
         trace!("Prepared diffsides.");
 
-        let ignores = self.get_ignores(options)?;
+        let ignores = self.get_ignores(&current, options)?;
 
         let global_filter = [AsRef::<Path>::as_ref("").to_path_buf()];
 
         let empty_set = AHashSet::new();
 
-        let cds = commit_diffside.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+        let cds = commit_diffside.read(
+            &current,
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+        )?;
 
-        let sds = stage_diffside.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+        let sds = stage_diffside.read(
+            &current,
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+        )?;
 
-        let lds = local_diffside.read("", &self.store, &global_filter, &ignores, &sds.0)?;
+        let lds =
+            local_diffside.read(&current, "", &self.store, &global_filter, &ignores, &sds.0)?;
 
         trace!("Read diffsides: {:?} -> {:?} -> {:?}.", cds.0, sds.0, lds.0);
 
@@ -1027,9 +1096,10 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn show<T: AsRef<str>>(
         &self,
+        parent: &Span,
         r#ref: T,
         options: &Cli,
     ) -> Result<(), EvsError> {
@@ -1043,7 +1113,9 @@ impl Repository {
         r#ref: &str,
         options: &Cli,
     ) -> Result<(), EvsError> {
-        let (hash, commit) = self.lookup(r#ref)?;
+        let current = Span::current();
+
+        let (hash, commit) = self.lookup(&current, r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
 
@@ -1055,13 +1127,14 @@ impl Repository {
 
         let rhs = DiffSide::Tree(commit.tree);
 
-        let lhs = DiffSide::Tree(self.get_tree(commit.parent)?);
+        let lhs = DiffSide::Tree(self.get_tree(&current, commit.parent)?);
 
         trace!("Diffing...");
 
         DiffSide::diff_with(
             lhs,
             rhs,
+            &current,
             &self.store,
             &[AsRef::<Path>::as_ref("").to_path_buf()],
             &[],
@@ -1070,9 +1143,10 @@ impl Repository {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn checkout<T: AsRef<str>>(
         &mut self,
+        parent: &Span,
         r#ref: T,
         force: bool,
         options: &Cli,
@@ -1082,21 +1156,24 @@ impl Repository {
         self.checkout_(r#ref.as_ref(), force, options)
     }
 
+    #[allow(clippy::too_many_lines, reason = "This is fine.")]
     fn checkout_(
         &mut self,
         r#ref: &str,
         force: bool,
         options: &Cli,
     ) -> Result<Hash, EvsError> {
-        let (hash, _) = self.lookup(r#ref)?;
+        let current = Span::current();
+
+        let (hash, _) = self.lookup(&current, r#ref)?;
 
         trace!("Found commit \"{}\".", HashDisplay(&hash));
 
-        let dest_tree = self.get_tree(hash)?;
+        let dest_tree = self.get_tree(&current, hash)?;
 
         trace!("Destination tree \"{}\".", HashDisplay(&dest_tree));
 
-        let mut src_tree = self.get_tree(self.info.head())?;
+        let mut src_tree = self.get_tree(&current, self.info.head())?;
 
         trace!("Source tree \"{}\".", HashDisplay(&src_tree));
 
@@ -1127,13 +1204,27 @@ impl Repository {
 
         let empty_set = AHashSet::new();
 
-        let ignores = self.get_ignores(options)?;
+        let ignores = self.get_ignores(&current, options)?;
 
-        let ds = ds.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+        let ds = ds.read(
+            &current,
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+        )?;
 
-        let dl = dl.read("", &self.store, &global_filter, &ignores, &ds.0)?;
+        let dl = dl.read(&current, "", &self.store, &global_filter, &ignores, &ds.0)?;
 
-        let dd = dd.read("", &self.store, &global_filter, &ignores, &empty_set)?;
+        let dd = dd.read(
+            &current,
+            "",
+            &self.store,
+            &global_filter,
+            &ignores,
+            &empty_set,
+        )?;
 
         trace!("Read diffsides.");
 

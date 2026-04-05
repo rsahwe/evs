@@ -3,13 +3,18 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
     path::PathBuf,
+    sync::Mutex,
     thread,
 };
 
-use ahash::AHashSet;
+use ahash::{AHashSet, HashSet};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use rayon::{
+    iter::{IntoParallelRefIterator as _, ParallelBridge as _, ParallelIterator as _},
+    join,
+};
 use sha2::{Digest as _, Sha256};
-use tracing::{debug, instrument, trace, warn};
+use tracing::{Span, debug, instrument, trace, warn};
 
 use crate::{
     error::{CorruptState, EvsError},
@@ -62,9 +67,10 @@ impl Store {
 
     /// Assumes a valid store and might cause unintended behaviour
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn insert(
         &self,
+        parent: &Span,
         mut obj: Object,
     ) -> Result<Hash, EvsError> {
         debug!("Store::insert(self, ...)");
@@ -135,9 +141,10 @@ impl Store {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn lookup(
         &self,
+        parent: &Span,
         id: &str,
     ) -> Result<(Hash, Object), EvsError> {
         if size_of_val(id) > FORMATTED_HASH_SIZE {
@@ -238,9 +245,10 @@ impl Store {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn check<T: AsRef<[Hash]>>(
         &self,
+        parent: &Span,
         found: AHashSet<Hash>,
         required: T,
         all: bool,
@@ -252,106 +260,73 @@ impl Store {
 
     fn check_(
         &self,
-        mut found: AHashSet<Hash>,
+        found: AHashSet<Hash>,
         required: &[Hash],
         all: bool,
     ) -> Result<(AHashSet<Hash>, AHashSet<Hash>), EvsError> {
-        let mut required = required.to_vec();
-        let mut extra = AHashSet::new();
-        let mut missing = AHashSet::new();
+        let current = Span::current();
 
-        let mut found_cache = AHashSet::new();
+        let mut extra = AHashSet::new();
+        let found = Mutex::new(found);
+        let missing = Mutex::new(AHashSet::new());
+
+        let found_cache = Mutex::new(AHashSet::new());
 
         trace!("Initially required to find {} object(s).", required.len());
 
-        while let Some(obj) = required.pop() {
-            let name = format!("{}", HashDisplay(&obj));
+        required
+            .par_iter()
+            .map(|item| self.check_one(&current, *item, &found, &found_cache, &missing))
+            .collect::<Result<(), EvsError>>()?;
 
-            let (hash, obj) = match self.lookup(&name) {
-                Ok(res) => res,
-                Err(EvsError::ObjectNotInStore(_)) => {
-                    warn!("Missing \"{}\"", name);
-                    missing.insert(obj);
-                    continue;
-                }
-                Err(err) => return Err(err),
-            };
+        let mut found = found.into_inner().unwrap();
+        let missing = missing.into_inner().unwrap();
 
-            found_cache.insert(name);
-
-            trace!("Validated \"{}\".", HashDisplay(&hash));
-
-            match obj {
-                Object::Null => trace!("Found the NULL object! :)"),
-                Object::Blob(data) => trace!("Found blob of size {}.", data.len()),
-                Object::Tree(items) => {
-                    trace!("Found tree with {} child(ren).", items.len());
-
-                    for item in items {
-                        trace!(
-                            "Requiring \"{}\" for \"{}\".",
-                            HashDisplay(&item.content),
-                            HashDisplay(&hash)
-                        );
-
-                        required.push(item.content);
-                    }
-                }
-                Object::Commit(commit) => {
-                    trace!(
-                        "Found commit with state \"{}\" and parent \"{}\".",
-                        HashDisplay(&commit.tree),
-                        HashDisplay(&commit.parent)
-                    );
-
-                    trace!(
-                        "Requiring \"{}\" for \"{}\".",
-                        HashDisplay(&commit.tree),
-                        HashDisplay(&hash)
-                    );
-
-                    required.push(commit.tree);
-
-                    trace!(
-                        "Requiring \"{}\" for \"{}\".",
-                        HashDisplay(&commit.parent),
-                        HashDisplay(&hash)
-                    );
-
-                    required.push(commit.parent);
-                }
-            }
-
-            found.insert(hash);
-        }
+        let found_cache = found_cache.into_inner().unwrap();
 
         if all {
-            for obj in self.path.read_dir().map_err(|e| (e, self.path.clone()))? {
-                let obj = obj.map_err(|e| (e, self.path.clone()))?;
+            extra = self
+                .path
+                .read_dir()
+                .map_err(|e| (e, self.path.clone()))?
+                .par_bridge()
+                .filter_map(|obj| {
+                    let _entered = current.enter();
 
-                let name = obj.file_name();
+                    let obj = match obj.map_err(|e| (e, self.path.clone())) {
+                        Ok(obj) => obj,
+                        Err(e) => return Some(Err(e.into())),
+                    };
 
-                let bytes = name.as_encoded_bytes();
+                    let name = obj.file_name();
 
-                if size_of_val(bytes) != FORMATTED_HASH_SIZE || name.to_str().is_none() {
-                    return Err(EvsError::CorruptStateDetected(
-                        CorruptState::InvalidObjectName(name),
-                    ));
-                }
+                    let bytes = name.as_encoded_bytes();
 
-                let name = name.to_str().unwrap();
+                    if size_of_val(bytes) != FORMATTED_HASH_SIZE || name.to_str().is_none() {
+                        return Some(Err(EvsError::CorruptStateDetected(
+                            CorruptState::InvalidObjectName(name),
+                        )));
+                    }
 
-                if found_cache.contains(name) {
-                    continue;
-                }
+                    let name = name.to_str().unwrap();
 
-                let (hash, _) = self.lookup(name)?;
+                    if found_cache.contains(name) {
+                        return None;
+                    }
 
-                trace!("Validated extra \"{}\".", name);
+                    let (hash, _) = match self.lookup(&current, name) {
+                        Ok(res) => res,
+                        Err(e) => return Some(Err(e)),
+                    };
 
-                found.insert(hash);
-                extra.insert(hash);
-            }
+                    trace!("Validated extra \"{}\".", name);
+
+                    Some(Ok(hash))
+                })
+                .collect::<Result<HashSet<Hash>, _>>()?
+                .into();
+
+            found.extend(extra.iter());
         }
 
         let normal_found = found.difference(&extra).count();
@@ -377,10 +352,99 @@ impl Store {
         Ok((found, extra))
     }
 
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
+    fn check_one(
+        &self,
+        parent: &Span,
+        hash: Hash,
+        found: &Mutex<AHashSet<Hash>>,
+        found_cache: &Mutex<AHashSet<String>>,
+        missing: &Mutex<AHashSet<Hash>>,
+    ) -> Result<(), EvsError> {
+        debug!("Store::check_one(self, \"{}\")", HashDisplay(&hash));
+
+        let current = Span::current();
+
+        if found.lock().unwrap().contains(&hash) {
+            return Ok(());
+        }
+
+        let name = format!("{}", HashDisplay(&hash));
+
+        let (hash, obj) = match self.lookup(&current, &name) {
+            Ok(res) => res,
+            Err(EvsError::ObjectNotInStore(_)) => {
+                warn!("Missing \"{}\"", name);
+                missing.lock().unwrap().insert(hash);
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
+
+        found_cache.lock().unwrap().insert(name);
+
+        trace!("Validated \"{}\".", HashDisplay(&hash));
+
+        match obj {
+            Object::Null => trace!("Found the NULL object! :)"),
+            Object::Blob(data) => trace!("Found blob of size {}.", data.len()),
+            Object::Tree(items) => {
+                trace!("Found tree with {} child(ren).", items.len());
+
+                items
+                    .par_iter()
+                    .map(|item| {
+                        let _entered = current.enter();
+
+                        trace!(
+                            "Requiring \"{}\" for \"{}\".",
+                            HashDisplay(&item.content),
+                            HashDisplay(&hash)
+                        );
+
+                        self.check_one(&current, item.content, found, found_cache, missing)
+                    })
+                    .collect::<Result<(), _>>()?;
+            }
+            Object::Commit(commit) => {
+                trace!(
+                    "Found commit with state \"{}\" and parent \"{}\".",
+                    HashDisplay(&commit.tree),
+                    HashDisplay(&commit.parent)
+                );
+
+                trace!(
+                    "Requiring \"{}\" for \"{}\".",
+                    HashDisplay(&commit.tree),
+                    HashDisplay(&hash)
+                );
+
+                trace!(
+                    "Requiring \"{}\" for \"{}\".",
+                    HashDisplay(&commit.parent),
+                    HashDisplay(&hash)
+                );
+
+                let (parent, tree) = join(
+                    || self.check_one(&current, commit.parent, found, found_cache, missing),
+                    || self.check_one(&current, commit.tree, found, found_cache, missing),
+                );
+
+                parent?;
+                tree?;
+            }
+        }
+
+        found.lock().unwrap().insert(hash);
+
+        Ok(())
+    }
+
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn remove(
         &self,
+        parent: &Span,
         path: Hash,
     ) -> Result<(), EvsError> {
         debug!("Store::remove(self, \"{}\")", HashDisplay(&path));
@@ -395,9 +459,10 @@ impl Store {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn resolve_rest(
         &self,
+        parent: &Span,
         r#ref: String,
     ) -> Result<String, EvsError> {
         debug!("Store::resolve_rest(self, \"{}\")", r#ref);
@@ -462,8 +527,11 @@ impl Store {
     }
 
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
-    pub fn status(&self) -> Result<(usize, usize), EvsError> {
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
+    pub fn status(
+        &self,
+        parent: &Span,
+    ) -> Result<(usize, usize), EvsError> {
         debug!("Store::status(self)");
 
         self.path

@@ -8,9 +8,7 @@ use std::{
 use ahash::AHashSet;
 use clap::{ArgAction, CommandFactory as _, Parser, Subcommand, ValueHint};
 use clap_complete::ArgValueCompleter;
-use enable_ansi_support::enable_ansi_support;
-use tracing::{Level, info, trace};
-use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan, util::SubscriberInitExt as _};
+use tracing::{Span, info, trace};
 
 use crate::{
     diff::DiffSide,
@@ -18,7 +16,7 @@ use crate::{
     objects::Object,
     repo::Repository,
     store::HashDisplay,
-    util::{get_color, partial_canonicalize, repo_ref_completer},
+    util::{partial_canonicalize, repo_ref_completer},
 };
 
 pub const VERBOSITY_NONE: u8 = 0;
@@ -175,42 +173,17 @@ pub enum Commands {
     Completion,
 }
 
-impl Cli {
+impl Commands {
     #[allow(
         clippy::too_many_lines,
         reason = "This is just because of the number of subcommands + this is totally fine due to the separation in the match."
     )]
     #[inline]
-    pub fn run(mut self) -> Result<(), EvsError> {
-        if enable_ansi_support().is_err() {
-            self.no_color = true;
-        }
-
-        let subscriber = tracing_subscriber::FmtSubscriber::builder()
-            .with_ansi(get_color(&self))
-            .with_ansi_sanitization(true)
-            .with_file(true)
-            .with_level(true)
-            .with_line_number(true)
-            .with_span_events(if self.verbose > 2 {
-                FmtSpan::EXIT
-            } else {
-                FmtSpan::NONE
-            })
-            .with_target(true)
-            .with_thread_ids(false)
-            .with_thread_names(false)
-            .with_env_filter(EnvFilter::from_default_env())
-            .without_time()
-            .with_max_level(match self.verbose {
-                0 => Level::WARN,
-                1 => Level::INFO,
-                2 => Level::DEBUG,
-                _ => Level::TRACE,
-            })
-            .compact()
-            .finish()
-            .set_default();
+    pub fn run(
+        &self,
+        options: &Cli,
+    ) -> Result<(), EvsError> {
+        let current = Span::current();
 
         macro_rules! get_repo {
             () => {{
@@ -219,7 +192,7 @@ impl Cli {
                     AsRef::<Path>::as_ref(".")
                 );
 
-                let repo = Repository::find(".", &self)?;
+                let repo = Repository::find(&current, ".", options)?;
 
                 info!("Found repository at {:?}.", repo.repository);
 
@@ -227,13 +200,13 @@ impl Cli {
             }};
         }
 
-        match &self.command {
+        match self {
             Commands::Init { path } => {
                 let path = path.as_ref().map_or(".".into(), ToOwned::to_owned);
 
                 info!("Creating repository at {:?}...", path);
 
-                let repo = Repository::create(path, &self)?;
+                let repo = Repository::create(&current, path, options)?;
 
                 info!("Created repository.");
 
@@ -244,7 +217,7 @@ impl Cli {
             Commands::Check { all } => {
                 let repo = get_repo!();
 
-                repo.check(*all)?;
+                repo.check(&current, *all)?;
 
                 drop(repo);
 
@@ -253,7 +226,7 @@ impl Cli {
             Commands::Cat { raw, r#ref } => {
                 let repo = get_repo!();
 
-                let (hash, obj) = repo.lookup(r#ref)?;
+                let (hash, obj) = repo.lookup(&current, r#ref)?;
 
                 info!("Printing object \"{}\":", HashDisplay(&hash));
 
@@ -271,6 +244,7 @@ impl Cli {
                 trace!("Adding {} paths:", paths.len());
 
                 let (set, map) = DiffSide::Tree(repo.info.stage()).read(
+                    &current,
                     "",
                     &repo.store,
                     &[AsRef::<Path>::as_ref("").to_path_buf()],
@@ -281,7 +255,7 @@ impl Cli {
                 drop(map);
 
                 for file in paths {
-                    repo.add(file, &set, &self)?;
+                    repo.add(&current, file, &set, options)?;
 
                     info!("Added {:?}", file);
                 }
@@ -294,7 +268,7 @@ impl Cli {
                 trace!("Removing {} paths:", paths.len());
 
                 for file in paths {
-                    repo.sub(file)?;
+                    repo.sub(&current, file)?;
 
                     info!("Removed {:?}", file);
                 }
@@ -318,7 +292,7 @@ impl Cli {
                 let mut amend_parent = None;
 
                 if *amend {
-                    let (_, Object::Commit(commit)) = repo.lookup("HEAD")? else {
+                    let (_, Object::Commit(commit)) = repo.lookup(&current, "HEAD")? else {
                         return Err(EvsError::CorruptStateDetected(
                             CorruptState::HeadIsNotACommit,
                         ));
@@ -353,12 +327,13 @@ impl Cli {
                 );
 
                 let commit = repo.commit(
+                    &current,
                     amend_parent,
                     message.into_owned(),
                     name.into_owned(),
                     email.into_owned(),
                     time,
-                    &self,
+                    options,
                 )?;
 
                 info!("Finished committing.");
@@ -372,21 +347,21 @@ impl Cli {
             } => {
                 let repo = get_repo!();
 
-                repo.log(r#ref, *limit, *oneline, &self)?;
+                repo.log(&current, r#ref, *limit, *oneline, options)?;
 
                 info!("Finished printing log.");
             }
             Commands::Gc => {
                 let repo = get_repo!();
 
-                repo.gc(&self)?;
+                repo.gc(&current, options)?;
 
                 info!("Finished collecting garbage.");
             }
             Commands::Resolve { r#ref } => {
                 let repo = get_repo!();
 
-                let hash = repo.resolve(r#ref)?;
+                let hash = repo.resolve(&current, r#ref)?;
 
                 trace!("\"{}\" resolved to \"{}\".", r#ref, hash);
 
@@ -403,21 +378,21 @@ impl Cli {
                 let (from, to) = if *staged {
                     let to = DiffSide::Tree(repo.info.stage());
 
-                    let from = DiffSide::Tree(repo.get_tree(repo.info.head())?);
+                    let from = DiffSide::Tree(repo.get_tree(&current, repo.info.head())?);
 
                     (from, to)
                 } else {
                     (
                         DiffSide::Tree(
                             from.as_ref()
-                                .map(|f| repo.get_tree(repo.lookup(f)?.0))
+                                .map(|f| repo.get_tree(&current, repo.lookup(&current, f)?.0))
                                 .transpose()?
                                 .unwrap_or(repo.info.stage()),
                         ),
                         to.as_ref()
                             .map(|t| {
                                 Ok::<DiffSide, EvsError>(DiffSide::Tree(
-                                    repo.get_tree(repo.lookup(t)?.0)?,
+                                    repo.get_tree(&current, repo.lookup(&current, t)?.0)?,
                                 ))
                             })
                             .transpose()?
@@ -430,19 +405,20 @@ impl Cli {
                 DiffSide::diff_with(
                     from,
                     to,
+                    &current,
                     &repo.store,
                     paths
                         .iter()
                         .map(|p| {
-                            partial_canonicalize(p)
+                            partial_canonicalize(&current, p)
                                 .map_err(|e| (e, p.clone()))?
                                 .strip_prefix(&repo.workspace)
                                 .map(Path::to_path_buf)
                                 .map_err(|_e| EvsError::PathOutsideOfRepo(p.clone()))
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    repo.get_ignores(&self)?,
-                    &self,
+                    repo.get_ignores(&current, options)?,
+                    options,
                 )?;
 
                 info!("Finished diff.");
@@ -450,33 +426,31 @@ impl Cli {
             Commands::Status => {
                 let repo = get_repo!();
 
-                repo.status(&self)?;
+                repo.status(&current, options)?;
 
                 info!("Finished reporting status.");
             }
             Commands::Show { r#ref } => {
                 let repo = get_repo!();
 
-                repo.show(r#ref, &self)?;
+                repo.show(&current, r#ref, options)?;
 
                 info!("Finished showing commit.");
             }
             Commands::Checkout { force, r#ref } => {
                 let mut repo = get_repo!();
 
-                let hash = repo.checkout(r#ref, *force, &self)?;
+                let hash = repo.checkout(&current, r#ref, *force, options)?;
 
                 println!("Checked out \"{}\" successfully.", HashDisplay(&hash));
             }
             Commands::Mangen { dir } => {
-                let command = Self::command();
+                let command = Cli::command();
 
                 clap_mangen::generate_to(command, dir).map_err(|e| (e, dir.clone()))?;
             }
             Commands::Completion => unreachable!("Fake command for completion engine"),
         }
-
-        drop(subscriber);
 
         Ok(())
     }

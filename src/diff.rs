@@ -6,12 +6,14 @@ use std::{
     io::{BufRead as _, Write as _, stdout},
     path::{Path, PathBuf},
     str::FromStr as _,
+    sync::Mutex,
 };
 
 use ahash::{AHashMap, AHashSet};
 use glob::Pattern;
+use rayon::iter::{IntoParallelRefIterator as _, ParallelBridge as _, ParallelIterator as _};
 use similar::{DiffableStr, TextDiff, udiff::UnifiedDiff};
-use tracing::{debug, instrument, trace};
+use tracing::{Span, debug, instrument, trace};
 
 use crate::{
     cli::Cli,
@@ -29,10 +31,11 @@ pub enum DiffSide {
 
 impl DiffSide {
     #[inline]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn diff_with<F: AsRef<[PathBuf]>, I: AsRef<[Pattern]>>(
         from: Self,
         to: Self,
+        parent: &Span,
         store: &Store,
         files: F,
         ignores: I,
@@ -61,11 +64,13 @@ impl DiffSide {
             return Ok(());
         }
 
-        let lhs = from.read("", store, files, ignores, &AHashSet::new())?;
+        let current = Span::current();
+
+        let lhs = from.read(&current, "", store, files, ignores, &AHashSet::new())?;
 
         trace!("Read 'from' diff source: {:?}.", lhs.0);
 
-        let rhs = to.read("", store, files, ignores, &lhs.0)?;
+        let rhs = to.read(&current, "", store, files, ignores, &lhs.0)?;
 
         trace!("Read 'to' diff source: {:?}.", rhs.0);
 
@@ -75,6 +80,7 @@ impl DiffSide {
 
         #[allow(clippy::indexing_slicing, reason = "The keys are in the map as well.")]
         DiffFormat::print(
+            &current,
             removals.map(|e| (e.clone(), &lhs.1[e])),
             insertions.map(|e| (e.clone(), &rhs.1[e])),
             modifications.filter_map(|e| {
@@ -94,9 +100,10 @@ impl DiffSide {
         clippy::type_complexity,
         reason = "It's not even that complex, I might do something later."
     )]
-    #[instrument(level = "debug", err(level = "debug"), skip_all)]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
     pub fn read<O: AsRef<Path>, F: AsRef<[PathBuf]>, I: AsRef<[Pattern]>>(
         self,
+        parent: &Span,
         origin: O,
         store: &Store,
         filter: F,
@@ -136,14 +143,16 @@ impl DiffSide {
         ignores: &[Pattern],
         overrides: &AHashSet<PathBuf>,
     ) -> Result<(AHashSet<PathBuf>, AHashMap<PathBuf, Vec<u8>>), EvsError> {
-        let mut sum_set = AHashSet::new();
-        let mut sum_map = AHashMap::new();
+        let current = Span::current();
+
+        let sum_set = Mutex::new(AHashSet::new());
+        let sum_map = Mutex::new(AHashMap::new());
 
         let result = match self {
             DiffSide::Tree(tree) => {
                 trace!("Reading from tree source \"{}\"...", HashDisplay(&tree));
 
-                let (hash, tree) = store.lookup(&format!("{}", HashDisplay(&tree)))?;
+                let (hash, tree) = store.lookup(&current, &format!("{}", HashDisplay(&tree)))?;
 
                 trace!("Found tree in store.");
 
@@ -151,121 +160,152 @@ impl DiffSide {
                     return Err(EvsError::NotATree(hash));
                 };
 
-                for entry in tree {
-                    let path = origin.join(match OsString::from_str(&entry.name) {
-                        Ok(str) => str,
-                    });
+                tree.par_iter()
+                    .map(|entry| {
+                        let _entered = current.enter();
 
-                    if !filter
-                        .iter()
-                        .any(|f| path.starts_with(f) || f.starts_with(&path))
-                    {
-                        trace!("Filtered path {:?}.", path);
+                        let path = origin.join(match OsString::from_str(&entry.name) {
+                            Ok(str) => str,
+                        });
 
-                        continue;
-                    }
+                        if !filter
+                            .iter()
+                            .any(|f| path.starts_with(f) || f.starts_with(&path))
+                        {
+                            trace!("Filtered path {:?}.", path);
 
-                    trace!("Reading path {:?}.", path);
-
-                    let (entry_hash, content) =
-                        store.lookup(&format!("{}", HashDisplay(&entry.content)))?;
-
-                    trace!("Found path content \"{}\".", HashDisplay(&entry_hash));
-
-                    match content {
-                        Object::Blob(content) => {
-                            trace!("Inserting blob {:?}...", path);
-
-                            sum_set.insert(path.clone());
-                            sum_map.insert(path, content);
+                            return Ok(());
                         }
-                        Object::Tree(_) => {
-                            trace!("Reading tree {:?}...", path);
 
-                            let (set, map) = DiffSide::Tree(entry_hash)
-                                .read(path, store, filter, ignores, overrides)?;
+                        trace!("Reading path {:?}.", path);
 
-                            for el in set {
-                                sum_set.insert(el);
+                        let (entry_hash, content) =
+                            store.lookup(&current, &format!("{}", HashDisplay(&entry.content)))?;
+
+                        trace!("Found path content \"{}\".", HashDisplay(&entry_hash));
+
+                        match content {
+                            Object::Blob(content) => {
+                                trace!("Inserting blob {:?}...", path);
+
+                                sum_set.lock().unwrap().insert(path.clone());
+                                sum_map.lock().unwrap().insert(path, content);
                             }
+                            Object::Tree(_) => {
+                                trace!("Reading tree {:?}...", path);
 
-                            for (k, v) in map {
-                                sum_map.insert(k, v);
+                                let (set, map) = DiffSide::Tree(entry_hash)
+                                    .read(&current, path, store, filter, ignores, overrides)?;
+
+                                let mut sum_set = sum_set.lock().unwrap();
+
+                                for el in set {
+                                    sum_set.insert(el);
+                                }
+
+                                drop(sum_set);
+
+                                let mut sum_map = sum_map.lock().unwrap();
+
+                                for (k, v) in map {
+                                    sum_map.insert(k, v);
+                                }
+
+                                drop(sum_map);
+
+                                trace!("Finished inserting tree.");
                             }
+                            Object::Null => {
+                                return Err(EvsError::CorruptStateDetected(
+                                    CorruptState::NonContentInTree(hash, entry_hash, "(null)"),
+                                ));
+                            }
+                            Object::Commit(_) => {
+                                return Err(EvsError::CorruptStateDetected(
+                                    CorruptState::NonContentInTree(hash, entry_hash, "commit"),
+                                ));
+                            }
+                        }
 
-                            trace!("Finished inserting tree.");
-                        }
-                        Object::Null => {
-                            return Err(EvsError::CorruptStateDetected(
-                                CorruptState::NonContentInTree(hash, entry_hash, "(null)"),
-                            ));
-                        }
-                        Object::Commit(_) => {
-                            return Err(EvsError::CorruptStateDetected(
-                                CorruptState::NonContentInTree(hash, entry_hash, "commit"),
-                            ));
-                        }
-                    }
-                }
+                        Ok(())
+                    })
+                    .collect::<Result<(), _>>()?;
 
-                (sum_set, sum_map)
+                (sum_set.into_inner().unwrap(), sum_map.into_inner().unwrap())
             }
             DiffSide::Local(path_buf) => {
                 trace!("Reading from local source {:?}...", path_buf);
 
                 let dir = path_buf.read_dir().map_err(|e| (e, path_buf.clone()))?;
 
-                for entry in dir {
-                    let entry = entry.map_err(|e| (e, path_buf.clone()))?;
+                dir.par_bridge()
+                    .map(|entry| {
+                        let _entered = current.enter();
 
-                    let entry_name = entry.file_name();
+                        let entry = entry.map_err(|e| (e, path_buf.clone()))?;
 
-                    let path = origin.join(&entry_name);
+                        let entry_name = entry.file_name();
 
-                    if !filter
-                        .iter()
-                        .any(|f| path.starts_with(f) || f.starts_with(&path))
-                        || (!overrides.iter().any(|o| o.starts_with(&path))
-                            && ignores
-                                .iter()
-                                .any(|i| path.ancestors().any(|a| i.matches_path(a))))
-                    {
-                        trace!("Filtered path {:?}.", path);
+                        let path = origin.join(&entry_name);
 
-                        continue;
-                    }
+                        if !filter
+                            .iter()
+                            .any(|f| path.starts_with(f) || f.starts_with(&path))
+                            || (!overrides.iter().any(|o| o.starts_with(&path))
+                                && ignores
+                                    .iter()
+                                    .any(|i| path.ancestors().any(|a| i.matches_path(a))))
+                        {
+                            trace!("Filtered path {:?}.", path);
 
-                    let entry = entry.path();
-
-                    if entry.is_file() {
-                        trace!("Inserting blob {:?}...", path);
-
-                        sum_set.insert(path.clone());
-                        sum_map.insert(path.clone(), fs::read(&entry).map_err(|e| (e, path))?);
-                    } else if entry.is_dir() {
-                        trace!("Reading tree {:?}...", path);
-
-                        let (set, map) =
-                            DiffSide::Local(entry).read(path, store, filter, ignores, overrides)?;
-
-                        for el in set {
-                            sum_set.insert(el);
+                            return Ok(());
                         }
 
-                        for (k, v) in map {
-                            sum_map.insert(k, v);
+                        let entry = entry.path();
+
+                        if entry.is_file() {
+                            trace!("Inserting blob {:?}...", path);
+
+                            sum_set.lock().unwrap().insert(path.clone());
+                            sum_map
+                                .lock()
+                                .unwrap()
+                                .insert(path.clone(), fs::read(&entry).map_err(|e| (e, path))?);
+                        } else if entry.is_dir() {
+                            trace!("Reading tree {:?}...", path);
+
+                            let (set, map) = DiffSide::Local(entry)
+                                .read(&current, path, store, filter, ignores, overrides)?;
+
+                            let mut sum_set = sum_set.lock().unwrap();
+
+                            for el in set {
+                                sum_set.insert(el);
+                            }
+
+                            drop(sum_set);
+
+                            let mut sum_map = sum_map.lock().unwrap();
+
+                            for (k, v) in map {
+                                sum_map.insert(k, v);
+                            }
+
+                            drop(sum_map);
+
+                            trace!("Finished inserting tree.");
+                        } else {
+                            trace!(
+                                "Skipping file {:?}, because it is neither a file nor a directory.",
+                                entry
+                            );
                         }
 
-                        trace!("Finished inserting tree.");
-                    } else {
-                        trace!(
-                            "Skipping file {:?}, because it is neither a file nor a directory.",
-                            entry
-                        );
-                    }
-                }
+                        Ok(())
+                    })
+                    .collect::<Result<(), EvsError>>()?;
 
-                (sum_set, sum_map)
+                (sum_set.into_inner().unwrap(), sum_map.into_inner().unwrap())
             }
         };
 
@@ -278,9 +318,9 @@ impl DiffSide {
 pub struct DiffFormat;
 
 impl DiffFormat {
-    //TODO: FIX THIS GARBAGE
+    //TODO: FIX THIS GARBAGE (IT'S HINDERING PARALLELIZATION TOO)
     #[inline]
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(parent = parent, level = "debug", skip_all)]
     pub fn print<
         RB: AsRef<[u8]>,
         RP: AsRef<Path>,
@@ -293,6 +333,7 @@ impl DiffFormat {
         MP: AsRef<Path>,
         M: IntoIterator<Item = (MP, MBL, MBR)>,
     >(
+        parent: &Span,
         removals: R,
         insertions: I,
         modifications: M,
