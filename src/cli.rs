@@ -57,13 +57,13 @@ pub enum Commands {
     /// Checks the evs store for validity and completeness.
     Check {
         /// Whether to check all objects in the store or only the required ones.
-        #[arg(short, long, default_value_t = false)]
+        #[arg(short, long)]
         all: bool,
     },
     /// Prints the given object from the store.
     Cat {
         /// Prints the raw bytes of an object in msgpack format.
-        #[arg(short, long, default_value_t = false)]
+        #[arg(short, long)]
         raw: bool,
         /// The object to print.
         #[arg(add(ArgValueCompleter::new(repo_ref_completer)))]
@@ -77,6 +77,9 @@ pub enum Commands {
     },
     /// Removes the given files and directories from the evs stage.
     Sub {
+        /// Whether to remove the given path entirely or merely unstage changes.
+        #[arg(short, long)]
+        delete: bool,
         /// The list of files and directories to remove.
         #[arg(value_hint(ValueHint::AnyPath))]
         paths: Vec<PathBuf>,
@@ -262,13 +265,13 @@ impl Commands {
 
                 info!("Finished adding.");
             }
-            Commands::Sub { paths } => {
+            Commands::Sub { delete, paths } => {
                 let mut repo = get_repo!();
 
                 trace!("Removing {} paths:", paths.len());
 
                 for file in paths {
-                    repo.sub(&current, file)?;
+                    repo.sub(&current, file, *delete)?;
 
                     info!("Removed {:?}", file);
                 }

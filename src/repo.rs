@@ -399,15 +399,17 @@ impl Repository {
         &mut self,
         parent: &Span,
         path: T,
+        delete: bool,
     ) -> Result<(), EvsError> {
         debug!("Repository::sub(self, {:?})", path.as_ref());
 
-        self.sub_(path.as_ref())
+        self.sub_(path.as_ref(), delete)
     }
 
     fn sub_(
         &mut self,
         path: &Path,
+        delete: bool,
     ) -> Result<(), EvsError> {
         let current = Span::current();
 
@@ -428,13 +430,26 @@ impl Repository {
             .unwrap();
 
         let new_stage = if relative == "" {
-            self.store.insert(&current, Object::Tree(vec![]))?
+            if delete {
+                self.store.insert(&current, Object::Tree(vec![]))?
+            } else {
+                self.get_tree(&current, self.info.head())?
+            }
         } else {
             match self.update_stage(
                 &current,
                 relative.components().peekable(),
                 relative,
-                None,
+                (!delete)
+                    .then(|| {
+                        self.tree_lookup(
+                            &current,
+                            self.get_tree(&current, self.info.head())?,
+                            path.components(),
+                        )
+                    })
+                    .transpose()?
+                    .flatten(),
                 self.info.stage(),
             )? {
                 Some(stage) => stage,
@@ -1319,6 +1334,47 @@ impl Repository {
     #[must_use]
     pub fn gc_roots(&self) -> Vec<Hash> {
         vec![self.info.head(), self.info.stage()]
+    }
+
+    #[inline]
+    #[instrument(parent = parent, level = "debug", err(level = "debug"), skip_all)]
+    pub fn tree_lookup(
+        &self,
+        parent: &Span,
+        tree: Hash,
+        mut path: Components,
+    ) -> Result<Option<Hash>, EvsError> {
+        debug!(
+            "Repository::tree_lookup(\"{}\", {:?})",
+            HashDisplay(&tree),
+            path
+        );
+
+        let current = Span::current();
+
+        let Some(name) = path.next() else {
+            trace!("Found \"{}\".", HashDisplay(&tree));
+
+            return Ok(Some(tree));
+        };
+
+        let name = name.as_os_str();
+
+        trace!("Looking for {:?}...", name);
+
+        match self
+            .store
+            .lookup(&current, &format!("{}", HashDisplay(&tree)))?
+            .1
+        {
+            Object::Tree(entries) => Ok(entries
+                .iter()
+                .find_map(|entry| (*entry.name == *name).then_some(entry.content))
+                .map(|content| self.tree_lookup(&current, content, path.clone()))
+                .transpose()?
+                .flatten()),
+            _ => Ok(None),
+        }
     }
 }
 

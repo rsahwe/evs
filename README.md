@@ -117,8 +117,8 @@ evs checkout HEAD
 - [x] Shell completions
 - [x] Nix flake
 - [x] `commit --amend`
+- [x] `sub --delete`
 - [ ] Parallelize diffing
-- [ ] Undo stage (`sub --unstage` or maybe probably `sub --delete`)
 - [ ] Ignores file overrides
 - [ ] More documentation (+ better man pages?) + code review of all lines in detail
 - [ ] Branch tools for evs
